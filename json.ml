@@ -1,5 +1,5 @@
-open Lexing
-module Iterator = Rope.Iterator
+open Incr_lexing
+module Iterator = Gadt_rope.Iterator
 
 type token =
   | END
@@ -86,4 +86,4 @@ let json_rope () =
     if s = "stop" then Buffer.contents b
     else begin Buffer.add_string b s; Buffer.add_char b '\n'; read b end
   in
-  read (Buffer.create 1024) |> Rope.of_string
+  read (Buffer.create 1024) |> Gadt_rope.of_string

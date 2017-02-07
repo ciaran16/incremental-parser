@@ -1,4 +1,4 @@
-open Pratt_parser
+open Incr_parsing
 open Combinators
 
 type token =
@@ -61,48 +61,19 @@ let expr = fix @@ fun expr ->
 
 let f () =
   let l = [LET; IDENT "y"; EQUAL; INT_LIT 4; IN; IDENT "x"; EQUAL; IDENT "y"] in
-  let tokens = Rope.of_list l in
+  let tokens = Gadt_rope.of_list l in
   let v1, incr = Incremental.make expr ~tokens ~end_token:END in
   let start = 3 in
-  let tokens = tokens |> Rope.delete_exn start |> Rope.insert_exn start (INT_LIT 5) in
+  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.insert_exn start (INT_LIT 5) in
   let v2 = incr |> Incremental.update ~start ~added:2 ~removed:0 ~tokens |> fst in
   v1, v2
 
 (* TODO The (2 ^ 2) doesn't get reused here. *)
 let g () =
   let l = [INT_LIT 1; PLUS; INT_LIT 2; POW; INT_LIT 2; TIMES; INT_LIT 3; PLUS; INT_LIT 4] in
-  let tokens = Rope.of_list l in
+  let tokens = Gadt_rope.of_list l in
   let v1, incr = Incremental.make expr ~tokens ~end_token:END in
   let start = 1 in
-  let tokens = tokens |> Rope.delete_exn start |> Rope.insert_exn start MINUS |> Rope.insert_exn (start + 1) (INT_LIT 0) |> Rope.insert_exn (start + 2) TIMES in
+  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.insert_exn start MINUS |> Gadt_rope.insert_exn (start + 1) (INT_LIT 0) |> Gadt_rope.insert_exn (start + 2) TIMES in
   let v2, _incr = incr |> Incremental.update ~start ~added:3 ~removed:1 ~tokens in
   v1, v2
-
-(*
-type token =
-  | STRING of string
-  | NUMBER of float
-  | OBJ_OPEN
-  | OBJ_CLOSE
-  | ARRAY_OPEN
-  | ARRAY_CLOSE
-  | TRUE
-  | FALSE
-  | NULL
-  | COMMA
-
-type json =
-  | Str of string
-  | Number of float
-  | True
-  | False
-  | Null
-
-let value =
-  let prefixes = function
-    | STRING s -> Prefix.return @@ Str s
-    | NUMBER n -> Prefix.return @@ Number n
-    | TRUE -> Prefix.return @@ True
-    | FALSE -> Prefix.return @@ False
-    | NULL -> Prefix.return @@ Null
-*)

@@ -1,18 +1,18 @@
 module Iterator = struct
   type 'tok t = {
-    rope_iter : 'tok Rope.Iterator.t;
+    rope_iter : 'tok Gadt_rope.Iterator.t;
     next : 'tok;
     pos : int;
     end_token : 'tok;
   }
 
   let next_or_end ~end_token rope_iter =
-    match rope_iter |> Rope.Iterator.next with
+    match rope_iter |> Gadt_rope.Iterator.next with
     | Some next, rope_iter -> next, rope_iter
     | None, rope_iter -> end_token, rope_iter
 
   let make_at pos ~tokens ~end_token =
-    let rope_iter = tokens |> Rope.iterator_at pos in
+    let rope_iter = tokens |> Gadt_rope.iterator_at pos in
     let next, rope_iter = rope_iter |> next_or_end ~end_token in
     {rope_iter; next; pos; end_token}
 

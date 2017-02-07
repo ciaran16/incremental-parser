@@ -1,9 +1,11 @@
+module Iterator = Gadt_rope.Iterator
+
 type 'tok lex_result =
   | Token of 'tok
   | Error_msg of string
   | Error_with_token of 'tok * string
 
-type ('char, 'tok) lex_f = 'char Rope.Iterator.t -> 'tok lex_result * 'char Rope.Iterator.t
+type ('char, 'tok) lex_f = 'char Iterator.t -> 'tok lex_result * 'char Iterator.t
 
 let token tok = Token tok
 
@@ -22,15 +24,15 @@ module Non_incremental = struct
       | Error_with_token (tok, _), iter -> tok :: loop iter
       | Token tok, iter -> tok :: loop iter
     in
-    rope |> Rope.iterator |> loop |> Rope.of_list
+    rope |> Gadt_rope.iterator |> loop |> Gadt_rope.of_list
 end
 
 module Incremental = struct
   type ('char, 'tok) t = {
-    rope : 'char Rope.t;
+    rope : 'char Gadt_rope.t;
     lexer : ('char, 'tok) lex_f;
     end_token : 'tok;
-    tokens : 'tok Rope.t;
+    tokens : 'tok Gadt_rope.t;
   }
 
   let make rope ~end_token lexer =
