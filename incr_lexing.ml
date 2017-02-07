@@ -21,8 +21,8 @@ module Non_incremental = struct
     let rec loop iter =
       match lexer iter with
       | Error_msg _, iter -> loop iter
-      | Error_with_token (tok, _), iter -> tok :: loop iter
-      | Token tok, iter -> tok :: loop iter
+      | Error_with_token (tok, _), iter | Token tok, iter ->
+        if tok = end_token then [tok] else tok :: loop iter
     in
     rope |> Gadt_rope.iterator |> loop |> Gadt_rope.of_list
 end
