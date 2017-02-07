@@ -1,3 +1,4 @@
+open Lexing
 module Iterator = Rope.Iterator
 
 type token =
@@ -10,18 +11,6 @@ type token =
   | NULL
   | NUMBER of float
   | STRING of string
-
-type 'tok lex_result =
-  | Token of 'tok
-  | Error_msg of string
-  | Error_with_token of 'tok * string
-
-let token tok = Token tok
-
-let error ?token msg =
-  match token with
-  | None -> Error_msg msg
-  | Some token -> Error_with_token (token, msg)
 
 let lex_keyword s tok ~iter =
   let rec check i iter =
@@ -91,7 +80,7 @@ let rec lex iter =
       in
       result, iter
 
-let read_json_rope =
+let json_rope () =
   let rec read b =
     let s = read_line () in
     if s = "stop" then Buffer.contents b
