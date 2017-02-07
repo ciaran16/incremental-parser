@@ -89,7 +89,7 @@ and ('tok, 'a) pratt_tree =
       value : 'a;
       size : int;
     }
-  | Custom of {
+  | Combinators of {
       parser : ('tok, 'a) parser;
       parse_tree : ('tok, 'a) parse_tree;
       value : 'a;
@@ -112,24 +112,6 @@ and ('tok, 'a) prefix = ('tok, 'a) state -> ('tok, 'a) pratt_tree * ('tok, 'a) s
 
 and ('tok, 'a) infix = int * (('tok, 'a) pratt_tree -> ('tok, 'a) prefix)
 
-module Combinators = struct
-  let eat tok = Eat tok
-
-  let any = Any
-
-  let satisfy f = Satisfy f
-
-  let (<*>) p q = App (p, q)
-
-  let (<$>) f p = Lift (f, p)
-
-  let ( *>) p q = (fun _ r -> r) <$> p <*> q
-
-  let (<* ) p q = (fun r _ -> r) <$> p <*> q
-
-  let fix f = Fix f
-end
-
 let value_parse = function
   | Value v -> v
   | App_node {value; _} | Lift_node {value; _} | Pratt_node {value; _} -> value
@@ -140,11 +122,11 @@ let size_parse : type a. ('tok, a) parse_tree -> int = function
 
 let value_pratt = function
   | Leaf v -> v
-  | Prefix {value; _} | Infix {value; _} | Postfix {value; _} | Custom {value; _} -> value
+  | Prefix {value; _} | Infix {value; _} | Postfix {value; _} | Combinators {value; _} -> value
 
 let size_pratt = function
   | Leaf _ -> 1
-  | Prefix {size; _} | Infix {size; _} | Postfix {size; _} | Custom {size; _} -> size
+  | Prefix {size; _} | Infix {size; _} | Postfix {size; _} | Combinators {size; _} -> size
 
 let app_node ~p ~q left right =
   let value = value_parse left (value_parse right) in
@@ -166,10 +148,8 @@ let infix ~prec ~f left right =
 let postfix ~prec ~f left =
   Postfix {prec; f; left; value = f (value_pratt left); size = size_pratt left + 1}
 
-let custom ~parser ~parse_tree =
-  Custom {parser; parse_tree; value=value_parse parse_tree; size=size_parse parse_tree}
-
-let pratt_parser ~prefixes ~infixes = Pratt {prefixes; infixes}
+let combinators ~parser ~parse_tree =
+  Combinators {parser; parse_tree; value=value_parse parse_tree; size=size_parse parse_tree}
 
 let make_state ~lookups ~iter = {lookups; iter; right_nodes=[]; right_pos=0}
 
@@ -180,14 +160,14 @@ let advance ({iter; right_nodes; right_pos; _} as state) =
     match right_nodes with
     | [] -> right_nodes, right_pos
     | _::_ when pos <= right_pos -> right_nodes, right_pos
-    | (Leaf _ | Postfix _ | Custom _)::right_nodes -> right_nodes, right_pos + 1
+    | (Leaf _ | Postfix _ | Combinators _)::right_nodes -> right_nodes, right_pos + 1
     | (Prefix {right; _} | Infix {right; _})::right_nodes ->
       let next_right_pos = right_pos + size_pratt right + 1 in
       if next_right_pos <= pos then right_nodes, next_right_pos
       else
         let right_pos =
           match right with
-          | Leaf _ | Prefix _ | Custom _ -> right_pos + 1
+          | Leaf _ | Prefix _ | Combinators _ -> right_pos + 1
           | Infix {left; _} | Postfix {left; _} -> right_pos + 1 + size_pratt left
         in
         right::right_nodes, right_pos
@@ -202,7 +182,7 @@ let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iterator.peek iter)
 
 let check_for_node ({iter; right_nodes; right_pos; _} as state) =
   let size_right = function
-    | Leaf _ | Prefix _ | Custom _ as node -> size_pratt node
+    | Leaf _ | Prefix _ | Combinators _ as node -> size_pratt node
     | Infix {right; _} -> size_pratt right + 1
     | Postfix _ -> 1
   in
@@ -218,7 +198,7 @@ let log_reuse s {iter; _} =
 
 let get_prefix_node state =
   match state |> check_for_node with
-  | Some ((Leaf _ | Prefix _ | Custom _), _) as r ->
+  | Some ((Leaf _ | Prefix _ | Combinators _), _) as r ->
     log_reuse "leaf / prefix" state; r
   | None | Some ((Infix _ | Postfix _), _) -> None
 
@@ -278,18 +258,41 @@ let rec run : type tok a. iter:tok Iterator.t -> (tok, a) parser ->
   | Fix f ->
     f (Fix f) |> run ~iter
 
+let unknown_infix = max_int, fun _left _state -> assert false
+
+module Combinators = struct
+  let pratt_parser ?(infixes=fun _ -> unknown_infix) ~prefixes = Pratt {prefixes; infixes}
+
+  let eat tok = Eat tok
+
+  let any = Any
+
+  let satisfy f = Satisfy f
+
+  let (<*>) p q = App (p, q)
+
+  let (<$>) f p = Lift (f, p)
+
+  let ( *>) p q = (fun _ r -> r) <$> p <*> q
+
+  let (<* ) p q = (fun r _ -> r) <$> p <*> q
+
+  let fix f = Fix f
+end
+
 module Prefix = struct
   let return v = fun state -> Leaf v, state
 
-  let unary ?(prec=(-1)) f =
-    fun state ->
-      let right, state = state |> parse_prefix ~prec in
-      prefix ~prec ~f right, state
+  let unary ?(prec=(-1)) f = fun state ->
+    let right, state = state |> parse_prefix ~prec in
+    prefix ~prec ~f right, state
 
   let custom parser = fun ({iter; _} as state) ->
     let parse_tree, iter = parser |> run ~iter in
     (* TODO this will unalign right nodes in state. *)
-    custom ~parser ~parse_tree, {state with iter}
+    combinators ~parser ~parse_tree, {state with iter}
+
+  let list parser ~sep ~stop f = ()
 end
 
 module Infix = struct
@@ -308,7 +311,7 @@ module Infix = struct
     prec,
     fun left state -> postfix ~prec ~f left, state
 
-  let unknown = max_int, fun _left _state -> assert false
+  let unknown = unknown_infix
 end
 
 module Non_incremental = struct
@@ -367,7 +370,7 @@ module Incremental = struct
       in
       let rec incr_parse ~prec ~pos:last_pos ~right_info node =
         let pos = match node with
-          | Leaf _ | Prefix _ | Custom _ -> last_pos
+          | Leaf _ | Prefix _ | Combinators _ -> last_pos
           | Infix {left; _} | Postfix {left; _} -> last_pos + size_pratt left
         in
         let go_right ~prec:prec' ~f make right =
@@ -380,11 +383,11 @@ module Incremental = struct
           else (node::right_nodes, pos + added - removed)
         in
         match node with
-        | Custom {parser; parse_tree; _} when start > pos ->
+        | Combinators {parser; parse_tree; _} when start > pos ->
           (* The token that triggers this has size 1, so we increment `pos`. *)
           let parse_tree, iter =
             parse_tree |> update_parse ~start ~added ~removed ~pos:(pos + 1) ~iter ~parser in
-          custom ~parser ~parse_tree, make_incr_state ~iter right_info
+          combinators ~parser ~parse_tree, make_incr_state ~iter right_info
         | Leaf _ as left when start > pos -> (* Right. *)
           right_info |> make_incr_state ~iter |> parse_infix ~prec left
         | Prefix {prec; f; right; _} when start > pos ->
@@ -393,10 +396,11 @@ module Incremental = struct
           go_right ~prec ~f (infix left) right
         | Infix {left; _} | Postfix {left; _} when start < pos -> (* Left. *)
           left |> incr_parse ~prec ~pos:last_pos ~right_info:(right_info |> add_right node)
-        | Leaf _ | Prefix _ | Infix _ | Postfix _ | Custom _ -> assert (start = pos); (* Hit. *)
+        | Leaf _ | Prefix _ | Infix _ | Postfix _ | Combinators _ -> (* Hit. *)
+          assert (start = pos);
           let state = right_info |> add_right node |> make_incr_state ~iter in
           begin match node with
-            | Leaf _ | Prefix _ | Custom _ -> state |> parse_prefix ~prec
+            | Leaf _ | Prefix _ | Combinators _ -> state |> parse_prefix ~prec
             | Infix {left; _} | Postfix {left; _} -> state |> parse_infix ~prec left
           end
       in

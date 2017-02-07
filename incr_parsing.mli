@@ -4,26 +4,26 @@ type ('tok, 'a) prefix
 
 type ('tok, 'a) infix
 
-val pratt_parser :
-  prefixes:('tok -> ('tok, 'a) prefix) -> infixes:('tok -> ('tok, 'a) infix) -> ('tok, 'a) parser
-
 module Combinators : sig
-  val eat : 'tok -> ('tok, 'tok) parser
+   val pratt_parser : ?infixes:('tok -> ('tok, 'a) infix) -> prefixes:('tok -> ('tok, 'a) prefix) ->
+     ('tok, 'a) parser
 
-  val any : ('tok, 'tok) parser
+   val eat : 'tok -> ('tok, 'tok) parser
 
-  val satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
+   val any : ('tok, 'tok) parser
 
-  val (<*>) : ('tok, 'a -> 'b) parser -> ('tok, 'a) parser -> ('tok, 'b) parser
+   val satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
 
-  val (<$>) : ('a -> 'b) -> ('tok, 'a) parser -> ('tok, 'b) parser
+   val (<*>) : ('tok, 'a -> 'b) parser -> ('tok, 'a) parser -> ('tok, 'b) parser
 
-  val ( *>) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'b) parser
+   val (<$>) : ('a -> 'b) -> ('tok, 'a) parser -> ('tok, 'b) parser
 
-  val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
+   val ( *>) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'b) parser
 
-  val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
-end
+   val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
+
+   val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
+ end
 
 module Prefix : sig
   val return : 'a -> ('tok, 'a) prefix
