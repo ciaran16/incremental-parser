@@ -27,3 +27,5 @@ module Iterator : sig
 end
 
 val iterator : 'a t -> 'a Iterator.t
+
+val iterator_at : int -> 'a t -> 'a Iterator.t

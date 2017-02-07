@@ -12,7 +12,7 @@ module Iterator = struct
     | None, rope_iter -> end_token, rope_iter
 
   let make_at pos ~tokens ~end_token =
-    let rope_iter = tokens |> Rope.iterator |> Rope.Iterator.drop pos in
+    let rope_iter = tokens |> Rope.iterator_at pos in
     let next, rope_iter = rope_iter |> next_or_end ~end_token in
     {rope_iter; next; pos; end_token}
 

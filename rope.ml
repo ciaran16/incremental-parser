@@ -289,9 +289,9 @@ module Iterator = struct
         node : ('a, 'n) tree
       } -> 'a path_item
 
-  let make = function
+  let make_at pos = function
     | Empty -> Empty_walk
-    | Tree tree -> Walk {tree; path=[]; pos=0}
+    | Tree tree -> Walk {tree; path=[]; pos}
 
   let change_to (type n) ~(tree : ('a, n) tree) ~path pos =
     let rec up (P {left; node} as hd) tl =
@@ -336,4 +336,6 @@ module Iterator = struct
     | Walk ({pos; _} as w) -> Walk {w with pos=pos + n}
 end
 
-let iterator t = Iterator.make t
+let iterator t = Iterator.make_at 0 t
+
+let iterator_at pos t = Iterator.make_at pos t
