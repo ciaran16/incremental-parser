@@ -87,3 +87,41 @@ let json_rope () =
     else begin Buffer.add_string b s; Buffer.add_char b '\n'; read b end
   in
   read (Buffer.create 1024) |> Gadt_rope.of_string
+
+open Incr_parsing
+open Combinators
+
+type json =
+  | Obj of json_obj
+  | Arr of json_arr
+  | Str of string
+  | Number of float
+  | Bool of bool
+  | Null
+
+and json_obj =
+  | Pair of string * json
+  | Obj_node of json_obj * json_obj
+
+and json_arr =
+  | Value of json
+  | Arr_node of json_arr * json_arr
+
+let value = fix @@ fun value ->
+  let pair =
+    let name = satisfy (function STRING s -> Some s | _ -> None) in
+    (fun name value -> Pair (name, value)) <$> name <*> eat COLON *> value
+  in
+  let prefixes = function
+    | OBJ_START ->
+      Prefix.list pair ~sep:COMMA ~stop:OBJ_END (fun l r -> Obj_node (l, r))
+    | ARRAY_START ->
+      let wrap_value = (fun v -> Value v) <$> value in
+      Prefix.list wrap_value ~sep:COMMA ~stop:ARRAY_END (fun l r -> Arr_node (l, r)
+    | BOOL b ->      Prefix.return (Bool b)
+    | NULL ->        Prefix.return Null
+    | STRING s ->    Prefix.return (Str s)
+    | NUMBER n ->    Prefix.return (Number n)
+    | _ -> failwith "Unknown prefix."
+  in
+  pratt_parser ~prefixes
