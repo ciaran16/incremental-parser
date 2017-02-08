@@ -4,9 +4,9 @@ http://www.cs.nyu.edu/courses/fall06/G22.3520-001/lec5.pdf
 - Insert anywhere in rope.
 *)
 
-type z = Z : z
+type z = Z
 
-type 'n s = S : 'n -> 'n s
+type 'n s = S
 
 type ('a, _) tree =
   | Leaf : 'a -> ('a, z) tree
@@ -35,18 +35,20 @@ let three l m r = Three (l, m, r, size l + size m + size r)
 let empty = Empty
 
 let of_list vs =
-  let rec reduce1 : type n. ('a, n) tree list -> ('a, n s) tree list = function
-    | [] -> []
+  let rec reduce1 : type n. ('a, n s) tree list -> ('a, n) tree list -> ('a, n s) tree list =
+    fun acc -> function
+    | [] -> List.rev acc
     | [_] -> assert false
-    | [l; m; r] -> [three l m r]
-    | l::r::nodes -> two l r :: reduce1 nodes
+    | [l; m; r] -> List.rev (three l m r :: acc)
+    | l::r::nodes -> reduce1 (two l r :: acc) nodes
   in
   let rec reduce : type n. ('a, n) tree list -> 'a t = function
     | [] -> Empty
     | [tree] -> Tree tree
-    | nodes -> nodes |> reduce1 |> reduce
+    | nodes -> nodes |> reduce1 [] |> reduce
   in
-  vs |> List.map leaf |> reduce
+  (* Using List.rev_map as it's tail recursive. *)
+  vs |> List.rev_map leaf |> List.rev |> reduce
 
 let of_string s =
   let rec explode i l = if i < 0 then l else explode (i - 1) (s.[i] :: l) in
