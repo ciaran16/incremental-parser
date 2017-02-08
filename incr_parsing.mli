@@ -5,8 +5,11 @@ type ('tok, 'a) prefix
 type ('tok, 'a) infix
 
 module Combinators : sig
-   val pratt_parser : ?infixes:('tok -> ('tok, 'a) infix) -> prefixes:('tok -> ('tok, 'a) prefix) ->
-     ('tok, 'a) parser
+  val pratt_parser :
+    ?empty_prefix:('tok, 'a) prefix ->
+    ?infixes:('tok -> ('tok, 'a) infix) ->
+    ('tok -> ('tok, 'a) prefix) ->
+    ('tok, 'a) parser
 
    val eat : 'tok -> ('tok, 'tok) parser
 
@@ -30,7 +33,12 @@ module Prefix : sig
 
   val unary : ?prec:int -> ('a -> 'a) -> ('tok, 'a) prefix
 
+  val list : ('tok, 'a) parser -> ('a -> 'a -> 'a) -> sep:'tok -> stop:'tok -> wrap:('a -> 'b) ->
+    ('tok, 'b) prefix
+
   val custom : ('tok, 'a) parser -> ('tok, 'a) prefix
+
+  val unknown : ('tok, 'a) prefix
 end
 
 module Infix : sig

@@ -15,8 +15,7 @@ type token =
 let lex_keyword s tok ~iter =
   let rec check i iter =
     if i = String.length s then token tok, iter
-    else
-      match Iterator.next iter with
+    else match Iterator.next iter with
       | Some next, iter when s.[i] = next -> check (i + 1) iter
       | _ -> error ("Unrecognised '" ^ String.sub s 0 i ^ "'."), iter
   in
@@ -108,20 +107,23 @@ and json_arr =
   | Arr_node of json_arr * json_arr
 
 let value = fix @@ fun value ->
-  let pair =
-    let name = satisfy (function STRING s -> Some s | _ -> None) in
-    (fun name value -> Pair (name, value)) <$> name <*> eat COLON *> value
-  in
+  let name = satisfy (function STRING s -> Some s | _ -> None) in
+  let pair = (fun n v -> Pair (n, v)) <$> name <*> eat COLON *> value in
+  let wrap_value = (fun v -> Value v) <$> value in
   let prefixes = function
     | OBJ_START ->
-      Prefix.list pair ~sep:COMMA ~stop:OBJ_END (fun l r -> Obj_node (l, r))
+      Prefix.list pair (fun l r -> Obj_node (l, r))
+        ~sep:COMMA ~stop:OBJ_END ~wrap:(fun o -> Obj o)
     | ARRAY_START ->
-      let wrap_value = (fun v -> Value v) <$> value in
-      Prefix.list wrap_value ~sep:COMMA ~stop:ARRAY_END (fun l r -> Arr_node (l, r)
+      Prefix.list wrap_value (fun l r -> Arr_node (l, r))
+        ~sep:COMMA ~stop:ARRAY_END ~wrap:(fun a -> Arr a)
     | BOOL b ->      Prefix.return (Bool b)
     | NULL ->        Prefix.return Null
     | STRING s ->    Prefix.return (Str s)
     | NUMBER n ->    Prefix.return (Number n)
     | _ -> failwith "Unknown prefix."
-  in
-  pratt_parser ~prefixes
+in pratt_parser prefixes
+
+let parse json =
+  let tokens = lex |> Incr_lexing.Non_incremental.lex_all json ~end_token:END in
+  value |> Non_incremental.run ~tokens ~end_token:END

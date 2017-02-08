@@ -1,4 +1,4 @@
 #use "topfind";;
 #directory "_build";;
-#load_rec "_build/pratt.cmo";;
+#load_rec "_build/toy_lang.cmo";;
 #load_rec "_build/json.cmo";;

@@ -105,12 +105,15 @@ and ('tok, 'a) state = {
 
 and ('tok, 'a) lookups = {
   prefixes : ('tok -> ('tok, 'a) prefix);
+  empty_prefix : ('tok, 'a) prefix;
   infixes : ('tok -> ('tok, 'a) infix);
 }
 
-and ('tok, 'a) prefix = ('tok, 'a) state -> ('tok, 'a) pratt_tree * ('tok, 'a) state
+and ('tok, 'a) state_f = ('tok, 'a) state -> ('tok, 'a) pratt_tree * ('tok, 'a) state
 
-and ('tok, 'a) infix = int * (('tok, 'a) pratt_tree -> ('tok, 'a) prefix)
+and ('tok, 'a) prefix = ('tok, 'a) state_f option
+
+and ('tok, 'a) infix = int * (('tok, 'a) pratt_tree -> ('tok, 'a) state_f)
 
 let value_parse = function
   | Value v -> v
@@ -178,6 +181,8 @@ let is_at_end {iter; _} = Iterator.is_at_end iter
 
 let lookup_prefix {lookups={prefixes; _}; iter; _} = prefixes (Iterator.peek iter)
 
+let lookup_empty_prefix {lookups={empty_prefix; _}; _} = empty_prefix
+
 let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iterator.peek iter)
 
 let check_for_node ({iter; right_nodes; right_pos; _} as state) =
@@ -226,7 +231,12 @@ let parse_prefix ~prec state =
   let left, state =
     match state |> get_prefix_node with
     | Some r -> r
-    | None -> let prefix = state |> lookup_prefix in state |> advance |> prefix
+    | None ->
+      match state |> lookup_prefix with
+      | Some prefix -> state |> advance |> prefix
+      | None -> match state |> lookup_empty_prefix with
+        | Some prefix -> state |> prefix
+        | None -> failwith ("Unexpected prefix at pos " ^ string_of_int (Iterator.pos state.iter))
   in
   state |> parse_infix ~prec left
 
@@ -258,10 +268,28 @@ let rec run : type tok a. iter:tok Iterator.t -> (tok, a) parser ->
   | Fix f ->
     f (Fix f) |> run ~iter
 
-let unknown_infix = max_int, fun _left _state -> assert false
+module Infix = struct
+  let pratt_infix ~is_left prec f =
+    prec,
+    fun left state ->
+      let prec = if is_left then prec else prec + 1 in
+      let right, state = state |> parse_prefix ~prec in
+      infix ~prec ~f left right, state
+
+  let left prec f = pratt_infix ~is_left:true prec f
+
+  let right prec f = pratt_infix ~is_left:false prec f
+
+  let postfix ?(prec=(-2)) f =
+    prec,
+    fun left state -> postfix ~prec ~f left, state
+
+  let unknown = max_int, fun _left _state -> assert false
+end
 
 module Combinators = struct
-  let pratt_parser ?(infixes=fun _ -> unknown_infix) ~prefixes = Pratt {prefixes; infixes}
+  let pratt_parser ?(empty_prefix=None) ?(infixes=fun _ -> Infix.unknown) prefixes =
+    Pratt {prefixes; empty_prefix; infixes}
 
   let eat tok = Eat tok
 
@@ -281,37 +309,28 @@ module Combinators = struct
 end
 
 module Prefix = struct
-  let return v = fun state -> Leaf v, state
+  let some x = Some x
 
-  let unary ?(prec=(-1)) f = fun state ->
+  let return v = some @@ fun state -> Leaf v, state
+
+  let unary ?(prec=(-1)) f = some @@ fun state ->
     let right, state = state |> parse_prefix ~prec in
     prefix ~prec ~f right, state
 
-  let custom parser = fun ({iter; _} as state) ->
+  let custom parser = some @@ fun ({iter; _} as state) ->
     let parse_tree, iter = parser |> run ~iter in
     (* TODO this will unalign right nodes in state. *)
     combinators ~parser ~parse_tree, {state with iter}
 
-  let list parser ~sep ~stop f = ()
-end
+  let unknown = None
 
-module Infix = struct
-  let pratt_infix ~is_left prec f =
-    prec,
-    fun left state ->
-      let prec = if is_left then prec else prec + 1 in
-      let right, state = state |> parse_prefix ~prec in
-      infix ~prec ~f left right, state
-
-  let left prec f = pratt_infix ~is_left:true prec f
-
-  let right prec f = pratt_infix ~is_left:false prec f
-
-  let postfix ?(prec=(-2)) f =
-    prec,
-    fun left state -> postfix ~prec ~f left, state
-
-  let unknown = unknown_infix
+  (* TODO if I allow empty infixes, make sep optional? *)
+  let list parser f ~sep ~stop ~wrap =
+    let open Combinators in
+    let infixes = fun tok -> if tok = sep then Infix.left 1 f else Infix.unknown in
+    let empty_prefix = custom parser in
+    let pratt = pratt_parser ~infixes ~empty_prefix (fun _ -> unknown) in
+    custom ((fun v _ -> wrap v) <$> pratt <*> eat stop)
 end
 
 module Non_incremental = struct

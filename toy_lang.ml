@@ -28,9 +28,11 @@ type expr =
   | Let of string * expr * expr
   | Var of string
 
-let make_if e1 e2 e3 = If (e1, e2, e3)
+let if_ e1 e2 e3 = If (e1, e2, e3)
 
-let make_let x e1 e2 = Let (x, e1, e2)
+let let_ x e1 e2 = Let (x, e1, e2)
+
+let ident = satisfy (function IDENT x -> Some x | _ -> None)
 
 let expr = fix @@ fun expr ->
   let prefixes = function
@@ -39,12 +41,9 @@ let expr = fix @@ fun expr ->
     | PLUS ->      Prefix.unary  (fun e -> e)
     | MINUS ->     Prefix.unary  (fun e -> Neg e)
     | IDENT x ->   Prefix.return (Var x)
-    | IF ->
-      Prefix.custom (make_if <$> expr <*> eat THEN *> expr <*> eat ELSE *> expr)
-    | LET ->
-      let ident = satisfy (function IDENT x -> Some x | _ -> None) in
-      Prefix.custom (make_let <$> ident <*> eat EQUAL *> expr <*> eat IN *> expr)
-    | _ -> failwith "Unknown prefix."
+    | IF ->        Prefix.custom (if_ <$> expr <*> eat THEN *> expr <*> eat ELSE *> expr)
+    | LET ->       Prefix.custom (let_ <$> ident <*> eat EQUAL *> expr <*> eat IN *> expr)
+    | _ ->         Prefix.unknown
   in
   let infixes = function
     | FACT ->   Infix.postfix (fun e -> Fact e)
@@ -57,15 +56,15 @@ let expr = fix @@ fun expr ->
     | OR ->     Infix.right 6 (fun e1 e2 -> Or (e1, e2))
     | _ ->      Infix.unknown
   in
-  pratt_parser ~prefixes ~infixes
+  pratt_parser prefixes ~infixes
 
 let f () =
-  let l = [LET; IDENT "y"; EQUAL; INT_LIT 4; IN; IDENT "x"; EQUAL; IDENT "y"] in
+  let l = [LET; IDENT "y"; EQUAL; INT_LIT 4; PLUS; AND; IN; IDENT "x"; EQUAL; IDENT "y"] in
   let tokens = Gadt_rope.of_list l in
   let v1, incr = Incremental.make expr ~tokens ~end_token:END in
   let start = 3 in
-  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.insert_exn start (INT_LIT 5) in
-  let v2 = incr |> Incremental.update ~start ~added:2 ~removed:0 ~tokens |> fst in
+  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.delete_exn start in
+  let v2 = incr |> Incremental.update ~start ~added:0 ~removed:2 ~tokens |> fst in
   v1, v2
 
 (* TODO The (2 ^ 2) doesn't get reused here. *)
