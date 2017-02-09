@@ -1,31 +1,52 @@
-type 'a t
-
-val length : 'a t -> int
-
-val empty : 'a t
-
-(** Takes O(n) time. *)
-val of_list : 'a list -> 'a t
-
-val of_string : string -> char t
-
-val get : int -> 'a t -> 'a option
-
-val insert_exn : int -> 'a -> 'a t -> 'a t
-
-val delete_exn : int -> 'a t -> 'a t
-
-module Iterator : sig
+module type S = sig
   type 'a t
 
-  (* Has amortized cost O(1) when iterating through contiguous items. *)
-  val next : 'a t -> 'a option * 'a t
+  type 'a rope = 'a t
 
-  val take : int -> 'a t -> 'a list * 'a t
+  val length : 'a t -> int
 
-  val drop : int -> 'a t -> 'a t
+  val append : 'a t -> 'a t -> 'a t
+
+  val split_exn : int -> 'a t -> 'a t * 'a t
+
+  module Fast_iterator : sig
+    type 'a t
+
+    (** Returns [None] if the given [t] has length 0. *)
+    val start_at : int -> 'a rope -> 'a t option
+
+    val is_at_end : 'a t -> bool
+
+    val next : 'a t -> 'a * 'a t
+
+    val skip : int -> 'a t -> 'a t
+  end
 end
 
-val iterator : 'a t -> 'a Iterator.t
+module type Container = sig
+  type 'a t
 
-val iterator_at : int -> 'a t -> 'a Iterator.t
+  val max_leaf_size : int
+
+  val length : 'a t -> int (** Must be O(1) *)
+
+  val get : 'a t -> int -> 'a
+
+  val append : 'a t -> 'a t -> 'a t
+
+  val sub : 'a t -> int -> int -> 'a t
+end
+
+module Make (C : Container) : S
+
+module Functional_array : sig
+  include S
+
+  val of_array : 'a array -> 'a t
+end
+
+module String_rope : sig
+  include S
+
+  val of_string : string -> char t
+end

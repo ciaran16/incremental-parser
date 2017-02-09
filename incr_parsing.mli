@@ -1,3 +1,5 @@
+module F_array = Gadt_rope.Functional_array
+
 type ('tok, 'a) parser
 
 type ('tok, 'a) prefix
@@ -52,15 +54,14 @@ module Infix : sig
 end
 
 module Non_incremental : sig
-  val run : tokens:'tok Gadt_rope.t -> end_token:'tok -> ('tok, 'a) parser -> 'a
+  val run : tokens:'tok F_array.t -> ('tok, 'a) parser -> 'a
 end
 
 module Incremental : sig
   type ('tok, 'a) t
 
-  val make : tokens:'tok Gadt_rope.t -> end_token:'tok -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
+  val make : tokens:'tok F_array.t -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
 
-  val update :
-    start:int -> added:int -> removed:int -> tokens:'tok Gadt_rope.t -> ('tok, 'a) t ->
+  val update : start:int -> added:int -> removed:int -> tokens:'tok F_array.t -> ('tok, 'a) t ->
     'a * ('tok, 'a) t
 end

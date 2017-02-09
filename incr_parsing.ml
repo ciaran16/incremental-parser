@@ -1,35 +1,25 @@
-module Iterator = struct
+module F_array = Gadt_rope.Functional_array
+
+module Iter_wrapper = struct
+  module Iterator = F_array.Fast_iterator
+
   type 'tok t = {
-    rope_iter : 'tok Gadt_rope.Iterator.t;
-    next : 'tok;
+    iter : 'tok Iterator.t;
     pos : int;
-    end_token : 'tok;
   }
 
-  let next_or_end ~end_token rope_iter =
-    match rope_iter |> Gadt_rope.Iterator.next with
-    | Some next, rope_iter -> next, rope_iter
-    | None, rope_iter -> end_token, rope_iter
+  let start_at pos tokens =
+    match tokens |> Iterator.start_at pos with
+    | None -> failwith "No tokens given to parser - there should be at least an end token."
+    | Some iter -> {iter; pos}
 
-  let make_at pos ~tokens ~end_token =
-    let rope_iter = tokens |> Gadt_rope.iterator_at pos in
-    let next, rope_iter = rope_iter |> next_or_end ~end_token in
-    {rope_iter; next; pos; end_token}
+  let next {iter; pos} = let next, iter = Iterator.next iter in next, {iter; pos=pos+1}
 
-  let make ~tokens ~end_token = make_at 0 ~tokens ~end_token
+  let peek {iter; _} = Iterator.next iter |> fst
 
-  let next {rope_iter; next; pos; end_token} =
-    next,
-    let next, rope_iter = rope_iter |> next_or_end ~end_token in
-    {rope_iter; next; pos=pos+1; end_token}
-
-  let peek {next; _} = next
+  let skip n {iter; pos} = let iter = iter |> Iterator.skip n in {iter; pos=pos+n}
 
   let pos {pos; _} = pos
-
-  let is_at_end {next; end_token; _} = next = end_token
-
-  let force_end ~pos ({end_token; _} as iter) = {iter with next=end_token; pos}
 end
 
 type ('tok, _) parser =
@@ -98,7 +88,7 @@ and ('tok, 'a) pratt_tree =
 
 and ('tok, 'a) state = {
   lookups : ('tok, 'a) lookups;
-  iter : 'tok Iterator.t;
+  iter : 'tok Iter_wrapper.t;
   right_nodes : ('tok, 'a) pratt_tree list;
   right_pos : int;
 }
@@ -157,8 +147,8 @@ let combinators ~parser ~parse_tree =
 let make_state ~lookups ~iter = {lookups; iter; right_nodes=[]; right_pos=0}
 
 let advance ({iter; right_nodes; right_pos; _} as state) =
-  let _, iter = iter |> Iterator.next in
-  let pos = Iterator.pos iter in
+  let iter = iter |> Iter_wrapper.next |> snd in
+  let pos = Iter_wrapper.pos iter in
   let right_nodes, right_pos =
     match right_nodes with
     | [] -> right_nodes, right_pos
@@ -177,13 +167,11 @@ let advance ({iter; right_nodes; right_pos; _} as state) =
   in
   {state with iter; right_nodes; right_pos}
 
-let is_at_end {iter; _} = Iterator.is_at_end iter
-
-let lookup_prefix {lookups={prefixes; _}; iter; _} = prefixes (Iterator.peek iter)
+let lookup_prefix {lookups={prefixes; _}; iter; _} = prefixes (Iter_wrapper.peek iter)
 
 let lookup_empty_prefix {lookups={empty_prefix; _}; _} = empty_prefix
 
-let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iterator.peek iter)
+let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iter_wrapper.peek iter)
 
 let check_for_node ({iter; right_nodes; right_pos; _} as state) =
   let size_right = function
@@ -191,15 +179,15 @@ let check_for_node ({iter; right_nodes; right_pos; _} as state) =
     | Infix {right; _} -> size_pratt right + 1
     | Postfix _ -> 1
   in
-  let pos = Iterator.pos iter in
+  let pos = Iter_wrapper.pos iter in
   match right_nodes with
   | node::right_nodes when pos = right_pos ->
-    let iter = iter |> Iterator.force_end ~pos:(pos + size_right node) in
+    let iter = iter |> Iter_wrapper.skip (size_right node) in
     Some (node, {state with iter; right_nodes; right_pos=pos})
   | _ -> None
 
 let log_reuse s {iter; _} =
-  print_endline @@ "Reusing " ^ s ^ " at pos " ^ string_of_int (Iterator.pos iter) ^ "."
+  print_endline @@ "Reusing " ^ s ^ " at pos " ^ string_of_int (Iter_wrapper.pos iter) ^ "."
 
 let get_prefix_node state =
   match state |> check_for_node with
@@ -219,13 +207,11 @@ let rec parse_infix ~prec left state =
   match state |> get_infix_node ~prec left with
   | Some (left, state) -> state |> parse_infix ~prec left
   | None ->
-    if is_at_end state then left, state
+    let next_prec, infix = state |> lookup_infix in
+    if next_prec >= prec then left, state
     else
-      let next_prec, infix = state |> lookup_infix in
-      if next_prec >= prec then left, state
-      else
-        let node, state = state |> advance |> infix left in
-        state |> parse_infix ~prec node
+      let node, state = state |> advance |> infix left in
+      state |> parse_infix ~prec node
 
 let parse_prefix ~prec state =
   let left, state =
@@ -236,23 +222,24 @@ let parse_prefix ~prec state =
       | Some prefix -> state |> advance |> prefix
       | None -> match state |> lookup_empty_prefix with
         | Some prefix -> state |> prefix
-        | None -> failwith ("Unexpected prefix at pos " ^ string_of_int (Iterator.pos state.iter))
+        | None ->
+          failwith ("Unexpected prefix at pos " ^ string_of_int (Iter_wrapper.pos state.iter))
   in
   state |> parse_infix ~prec left
 
 let pratt_parse state = state |> parse_prefix ~prec:max_int
 
-let rec run : type tok a. iter:tok Iterator.t -> (tok, a) parser ->
-  (tok, a) parse_tree * tok Iterator.t = fun ~iter ->
-  let fail s = failwith @@ s ^ " failed at pos " ^ (string_of_int @@ Iterator.pos iter) ^ "." in
+let rec run : type tok a. iter:tok Iter_wrapper.t -> (tok, a) parser ->
+  (tok, a) parse_tree * tok Iter_wrapper.t = fun ~iter ->
+  let fail s = failwith @@ s ^ " failed at pos " ^ (string_of_int @@ Iter_wrapper.pos iter) ^ "." in
   function
   | Eat tok ->
-    let tok', iter = iter |> Iterator.next in
+    let tok', iter = iter |> Iter_wrapper.next in
     if tok = tok' then Value tok, iter else fail "Eat"
   | Any ->
-    let tok, iter = iter |> Iterator.next in Value tok, iter
+    let tok, iter = iter |> Iter_wrapper.next in Value tok, iter
   | Satisfy f ->
-    let tok, iter = iter |> Iterator.next in begin match f tok with
+    let tok, iter = iter |> Iter_wrapper.next in begin match f tok with
       | Some v -> Value v, iter
       | None -> fail "Satisfy"
     end
@@ -334,28 +321,27 @@ module Prefix = struct
 end
 
 module Non_incremental = struct
-  let build_tree ~tokens ~end_token parser =
-    let iter = Iterator.make ~tokens ~end_token in
+  let build_tree ~tokens parser =
+    let iter = Iter_wrapper.start_at 0 tokens in
     parser |> run ~iter |> fst
 
-  let run ~tokens ~end_token parser = parser |> build_tree ~tokens ~end_token |> value_parse
+  let run ~tokens parser = parser |> build_tree ~tokens |> value_parse
 end
 
 module Incremental = struct
-  type ('tok, 'a) t = T : {
-      parser : ('tok, 'a) parser;
-      end_token : 'tok;
-      parse_tree : ('tok, 'a) parse_tree;
-    } -> ('tok, 'a) t
+  type ('tok, 'a) t = {
+    parser : ('tok, 'a) parser;
+    parse_tree : ('tok, 'a) parse_tree;
+  }
 
-  let make ~tokens ~end_token parser =
-    let parse_tree = parser |> Non_incremental.build_tree ~tokens ~end_token in
-    value_parse parse_tree, T {parser; end_token; parse_tree}
+  let make ~tokens parser =
+    let parse_tree = parser |> Non_incremental.build_tree ~tokens in
+    value_parse parse_tree, {parser; parse_tree}
 
   (* TODO factor some of this out into a record, pass that around instead. *)
   let rec update_parse : type a. start:int -> added:int -> removed:int -> pos:int ->
-    iter:'tok Iterator.t -> parser:('tok, a) parser -> ('tok, a) parse_tree ->
-    ('tok, a) parse_tree * 'tok Iterator.t =
+    iter:'tok Iter_wrapper.t -> parser:('tok, a) parser -> ('tok, a) parse_tree ->
+    ('tok, a) parse_tree * 'tok Iter_wrapper.t =
     fun ~start ~added ~removed ~pos ~iter ~parser node ->
       if start = pos && removed > size_parse node then
         (* If the changed area is greater than the size of the parsed node then reparse. *)
@@ -381,8 +367,8 @@ module Incremental = struct
           app_node ~p ~q left right, iter
 
   and update_pratt : type a. start:int -> added:int -> removed:int -> pos:int ->
-    iter:'tok Iterator.t -> lookups:('tok, a) lookups -> ('tok, a) pratt_tree ->
-    ('tok, a) pratt_tree * 'tok Iterator.t =
+    iter:'tok Iter_wrapper.t -> lookups:('tok, a) lookups -> ('tok, a) pratt_tree ->
+    ('tok, a) pratt_tree * 'tok Iter_wrapper.t =
     fun ~start ~added ~removed ~pos ~iter ~lookups pratt_tree ->
       let make_incr_state ~iter (right_nodes, right_pos) =
         {(make_state ~lookups ~iter) with right_nodes; right_pos}
@@ -403,7 +389,7 @@ module Incremental = struct
         in
         match node with
         | Combinators {parser; parse_tree; _} when start > pos ->
-          (* The token that triggers this has size 1, so we increment `pos`. *)
+          (* The token that triggers this has size 1, so we increment pos. *)
           let parse_tree, iter =
             parse_tree |> update_parse ~start ~added ~removed ~pos:(pos + 1) ~iter ~parser in
           combinators ~parser ~parse_tree, make_incr_state ~iter right_info
@@ -426,8 +412,8 @@ module Incremental = struct
       let pratt_tree, {iter; _} = pratt_tree |> incr_parse ~pos ~prec:max_int ~right_info:([], 0) in
       pratt_tree, iter
 
-  let update ~start ~added ~removed ~tokens (T {parser; end_token; parse_tree}) =
-    let iter = Iterator.make_at start ~tokens ~end_token in
+  let update ~start ~added ~removed ~tokens {parser; parse_tree} =
+    let iter = Iter_wrapper.start_at start tokens in
     let parse_tree, _ = parse_tree |> update_parse ~start ~added ~removed ~pos:0 ~iter ~parser in
-    value_parse parse_tree, T {parser; end_token; parse_tree}
+    value_parse parse_tree, {parser; parse_tree}
 end
