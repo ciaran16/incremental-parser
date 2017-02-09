@@ -6,6 +6,19 @@ module type S = sig
   val append : 'a t -> 'a t -> 'a t
 
   val split_exn : int -> 'a t -> 'a t * 'a t
+
+  module Fast_iterator : sig
+    type 'a it
+
+    (** Returns [None] if the given [t] has length 0. *)
+    val start_at : int -> 'a t -> 'a it option
+
+    val is_at_end : 'a it -> bool
+
+    val next : 'a it -> 'a * 'a it
+
+    val skip : int -> 'a it -> 'a it
+  end
 end
 
 module type Container = sig

@@ -20,6 +20,18 @@ module type S = sig
   val append : 'a t -> 'a t -> 'a t
 
   val split_exn : int -> 'a t -> 'a t * 'a t
+
+  module Fast_iterator : sig
+    type 'a it
+
+    val start_at : int -> 'a t -> 'a it option
+
+    val is_at_end : 'a it -> bool
+
+    val next : 'a it -> 'a * 'a it
+
+    val skip : int -> 'a it -> 'a it
+  end
 end
 
 module Make (C : Container) : sig
@@ -254,6 +266,76 @@ end = struct
         | Short c -> flat c
       in
       let l, r = tree |> split i in convert_one_tree l, convert_one_tree r
+
+  module Fast_iterator = struct
+    type 'a it = {
+      path_o : ('a, z) path option;
+      c : 'a C.t;
+      i : int;
+      ended : bool;
+    }
+
+    and ('a, _) path =
+      | Top : ('a, 'n s) tree -> ('a, 'n s) path
+      | Node : {
+          path : ('a, 'n s) path;
+          node : ('a, 'n) tree;
+          offset : int;
+        } -> ('a, 'n) path
+
+    let rec get : type n. int -> ('a, n) path -> 'a it = fun i path ->
+      let down (type n) (node : ('a, n s) tree) ~path ~offset =
+        let node, i' = match node with
+          | Two (t1, t2, _) ->
+            let n1 = size t1 in
+            if i < n1 then (t1, i)
+            else (t2, i - n1)
+          | Three (t1, t2, t3, _) ->
+            let n1 = size t1 in
+            let n2 = n1 + size t2 in
+            if i < n1 then (t1, i)
+            else if i < n2 then (t2, i - n1)
+            else (t3, i - n2)
+        in
+        get i' (Node {path; node; offset = offset + i - i'})
+      in
+      match path with
+      | Node {node=Leaf c; _} -> {path_o=Some path; c; i; ended = i >= C.length c}
+      | Top (Two _ as node) -> down node ~path ~offset:0
+      | Top (Three _ as node) -> down node ~path ~offset:0
+      | Node {node=Two _ as node; offset; _} -> down node ~path ~offset
+      | Node {node=Three _ as node; offset; _} -> down node ~path ~offset
+
+    let move : type n. int -> ('a, n) path -> 'a it = fun i -> function
+      | Top _ as path -> path |> get i
+      | Node {path; offset; _} ->
+        let rec move : type n. int -> ('a, n s) path -> 'a it = fun pos -> function
+          | Top _ as path -> get pos path
+          | Node {path=up_path; node; offset} as path ->
+            let i = pos - offset in
+            if i >= 0 && i < size node then get i path
+            else move pos up_path
+        in
+        path |> move (offset + i)
+
+    let start_at pos = function
+      | Flat c -> if C.length c = 0 then None else Some ({path_o=None; c; i=pos; ended=false})
+      | Tree (Leaf c) -> Some ({path_o=None; c; i=pos; ended=false})
+      | Tree (Two _ as tree) -> Some ((Top tree) |> get pos)
+      | Tree (Three _ as tree) -> Some ((Top tree) |> get pos)
+
+    let is_at_end {ended; _} = ended
+
+    let next ({path_o; c; i; ended} as t) =
+      let len = C.length c in
+      if i < len then C.get c i, {t with i = i + 1}
+      else if ended then C.get c (len - 1), t
+      else match path_o with
+        | None -> C.get c (len - 1), {t with ended=true}
+        | Some path -> let ({c; i; _} as t) = path |> move (i + 1) in C.get c i, t
+
+    let skip n ({i; _} as t) = {t with i = i + n}
+  end
 end
 
 module Functional_array = struct
