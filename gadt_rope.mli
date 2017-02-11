@@ -7,6 +7,8 @@ module type S = sig
 
   val length : 'a t -> int
 
+  val empty : 'a t
+
   val append : 'a t -> 'a t -> 'a t
 
   val concat : 'a t list -> 'a t
@@ -32,7 +34,7 @@ module type Container = sig
 
   val max_leaf_size : int
 
-  val length : 'a t -> int (** Must be O(1) *)
+  val length : 'a t -> int (** Must take O(1) time. *)
 
   val get : 'a t -> int -> 'a
 
@@ -45,22 +47,30 @@ module Make (C : Container) : sig
   include S
 
   val of_container : 'a C.t -> 'a t
+
+  val flatten : 'a t -> 'a C.t list
 end
 
 module Functional_array : sig
   include S
 
   val of_array : 'a array -> 'a t
+
+  val to_array : 'a t -> 'a array
 end
 
 module String_rope : sig
   include S
 
   val of_string : string -> char t
+
+  val to_string : char t -> string
 end
 
 module One_rope : sig
   include S
 
   val of_list : 'a list -> 'a t
+
+  val to_list : 'a t -> 'a list
 end
