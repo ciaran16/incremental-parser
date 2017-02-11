@@ -1,5 +1,6 @@
 open Incr_parsing
 open Combinators
+module F_array = Gadt_rope.Functional_array
 
 type token =
   | END
@@ -59,20 +60,21 @@ let expr = fix @@ fun expr ->
   pratt_parser prefixes ~infixes
 
 let f () =
-  let l = [LET; IDENT "y"; EQUAL; INT_LIT 4; PLUS; AND; IN; IDENT "x"; EQUAL; IDENT "y"] in
-  let tokens = Gadt_rope.of_list l in
-  let v1, incr = Incremental.make expr ~tokens ~end_token:END in
-  let start = 3 in
-  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.delete_exn start in
-  let v2 = incr |> Incremental.update ~start ~added:0 ~removed:2 ~tokens |> fst in
+  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 4; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let tokens = F_array.of_array a in
+  let v1, incr = Incremental.make expr ~tokens in
+  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 4; PLUS; INT_LIT 2; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let tokens = F_array.of_array a in
+  let v2 = incr |> Incremental.update ~start:4 ~added:2 ~removed:0 ~tokens |> fst in
   v1, v2
 
-(* TODO The (2 ^ 2) doesn't get reused here. *)
+(* TODO The (2 ^ 2) doesn't get reused here.
 let g () =
   let l = [INT_LIT 1; PLUS; INT_LIT 2; POW; INT_LIT 2; TIMES; INT_LIT 3; PLUS; INT_LIT 4] in
-  let tokens = Gadt_rope.of_list l in
+  let tokens = F_array.of_list l in
   let v1, incr = Incremental.make expr ~tokens ~end_token:END in
   let start = 1 in
-  let tokens = tokens |> Gadt_rope.delete_exn start |> Gadt_rope.insert_exn start MINUS |> Gadt_rope.insert_exn (start + 1) (INT_LIT 0) |> Gadt_rope.insert_exn (start + 2) TIMES in
+  let tokens = tokens |> F_array.delete_exn start |> F_array.insert_exn start MINUS |> F_array.insert_exn (start + 1) (INT_LIT 0) |> Gadt_rope.insert_exn (start + 2) TIMES in
   let v2, _incr = incr |> Incremental.update ~start ~added:3 ~removed:1 ~tokens in
-  v1, v2
+   v1, v2
+*)
