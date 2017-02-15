@@ -1,7 +1,5 @@
-module F_array = Gadt_rope.Functional_array
-
 module Iter_wrapper = struct
-  module Iterator = F_array.Fast_iterator
+  module Iterator = Gadt_rope.F_array.Iterator
 
   type 'tok t = {
     iter : 'tok Iterator.t;
@@ -220,7 +218,8 @@ let parse_prefix ~prec state =
     | None ->
       match state |> lookup_prefix with
       | Some prefix -> state |> advance |> prefix
-      | None -> match state |> lookup_empty_prefix with
+      | None ->
+        match state |> lookup_empty_prefix with
         | Some prefix -> state |> prefix
         | None ->
           failwith ("Unexpected prefix at pos " ^ string_of_int (Iter_wrapper.pos state.iter))
@@ -311,10 +310,10 @@ module Prefix = struct
 
   let unknown = None
 
-  (* TODO if I allow empty infixes, make sep optional? *)
+  (* TODO Doesn't handle empty lists! If I allow empty infixes, make sep optional? *)
   let list parser f ~sep ~stop ~wrap =
     let open Combinators in
-    let infixes = fun tok -> if tok = sep then Infix.left 1 f else Infix.unknown in
+    let infixes tok = if tok = sep then Infix.left 1 f else Infix.unknown in
     let empty_prefix = custom parser in
     let pratt = pratt_parser ~infixes ~empty_prefix (fun _ -> unknown) in
     custom ((fun v _ -> wrap v) <$> pratt <*> eat stop)

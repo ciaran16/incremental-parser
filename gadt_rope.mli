@@ -15,7 +15,7 @@ module type S = sig
 
   val split_exn : int -> 'a t -> 'a t * 'a t
 
-  module Fast_iterator : sig
+  module Iterator : sig
     type 'a t
 
     (** Returns [None] if the rope has length 0. *)
@@ -51,7 +51,7 @@ module Make (C : Container) : sig
   val flatten : 'a t -> 'a C.t list
 end
 
-module Functional_array : sig
+module F_array : sig
   include S
 
   val of_array : 'a array -> 'a t
@@ -59,7 +59,7 @@ module Functional_array : sig
   val to_array : 'a t -> 'a array
 end
 
-module String_rope : sig
+module Rope : sig
   include S
 
   val of_string : string -> char t

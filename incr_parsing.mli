@@ -1,4 +1,4 @@
-module F_array = Gadt_rope.Functional_array
+open Gadt_rope
 
 type ('tok, 'a) parser
 

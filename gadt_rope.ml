@@ -29,7 +29,7 @@ module type S = sig
 
   val split_exn : int -> 'a t -> 'a t * 'a t
 
-  module Fast_iterator : sig
+  module Iterator : sig
     type 'a t
 
     val start_at : int -> 'a rope -> 'a t option
@@ -322,7 +322,7 @@ module Make (C : Container) = struct
       in
       let l, r = tree |> split i in convert_one_tree l, convert_one_tree r
 
-  module Fast_iterator = struct
+  module Iterator = struct
     type 'a t = {
       path_o : ('a, z) path option;
       c : 'a C.t;
@@ -396,7 +396,7 @@ module Make (C : Container) = struct
   end
 end
 
-module Functional_array = struct
+module F_array = struct
   module C_array = struct
     type 'a t = 'a array
 
@@ -418,7 +418,7 @@ module Functional_array = struct
   let to_array t = t |> flatten |> Array.concat
 end
 
-module String_rope = struct
+module Rope = struct
   module C_string = struct
     type 'a t = Str : string -> char t
 
