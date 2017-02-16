@@ -144,6 +144,8 @@ let combinators ~parser ~parse_tree =
 
 let make_state ~lookups ~iter = {lookups; iter; right_nodes=[]; right_pos=0}
 
+let get_iterator {iter; _} = iter
+
 let advance ({iter; right_nodes; right_pos; _} as state) =
   let iter = iter |> Iter_wrapper.next |> snd in
   let pos = Iter_wrapper.pos iter in
@@ -303,14 +305,15 @@ module Prefix = struct
     let right, state = state |> parse_prefix ~prec in
     prefix ~prec ~f right, state
 
-  let custom parser = some @@ fun ({iter; _} as state) ->
+  let custom parser = some @@ fun ({lookups; _} as state) ->
+    let iter = state |> get_iterator in
     let parse_tree, iter = parser |> run ~iter in
-    (* TODO this will unalign right nodes in state. *)
-    combinators ~parser ~parse_tree, {state with iter}
+    (* TODO need to carry across right nodes. *)
+    combinators ~parser ~parse_tree, make_state ~lookups ~iter
 
   let unknown = None
 
-  (* TODO Doesn't handle empty lists! If I allow empty infixes, make sep optional? *)
+  (* TODO Doesn't handle empty lists. If I allow empty infixes, make sep optional? *)
   let list parser f ~sep ~stop ~wrap =
     let open Combinators in
     let infixes tok = if tok = sep then Infix.left 1 f else Infix.unknown in
@@ -333,42 +336,50 @@ module Incremental = struct
     parse_tree : ('tok, 'a) parse_tree;
   }
 
+  type 'tok update_info = {
+    start : int;
+    added : int;
+    removed : int;
+    iter : 'tok Iter_wrapper.t
+  }
+
   let make ~tokens parser =
     let parse_tree = parser |> Non_incremental.build_tree ~tokens in
     value_parse parse_tree, {parser; parse_tree}
 
-  (* TODO factor some of this out into a record, pass that around instead. *)
-  let rec update_parse : type a. start:int -> added:int -> removed:int -> pos:int ->
-    iter:'tok Iter_wrapper.t -> parser:('tok, a) parser -> ('tok, a) parse_tree ->
-    ('tok, a) parse_tree * 'tok Iter_wrapper.t =
-    fun ~start ~added ~removed ~pos ~iter ~parser node ->
-      if start = pos && removed > size_parse node then
-        (* If the changed area is greater than the size of the parsed node then reparse. *)
-        (* TODO this requires more thought to get right. *)
-        parser |> run ~iter
-      else
-        match node with
-        | Value _ -> assert (start >= pos);
-          parser |> run ~iter
-        | Lift_node {f; p; node; _} ->
-          let node, iter = node |> update_parse ~start ~added ~removed ~pos ~iter ~parser:p in
-          lift_node ~f ~p node, iter
-        | Pratt_node {lookups; pratt_tree; _} ->
-          let pratt_tree, iter =
-            update_pratt ~start ~added ~removed ~pos ~iter ~lookups pratt_tree in
-          pratt_node ~lookups pratt_tree, iter
-        | App_node {p; q; left; right; _} when start < pos + size_parse left -> (* Left. *)
-          let left, iter = left |> update_parse ~start ~added ~removed ~pos ~iter ~parser:p in
+  let rec update_parse : type a. 'tok update_info -> pos:int -> parser:('tok, a) parser ->
+    ('tok, a) parse_tree -> ('tok, a) parse_tree * 'tok Iter_wrapper.t =
+    fun ({start; added; removed; iter} as info) ~pos ~parser -> function
+      | Value _ as node ->
+        if start > pos then node, iter else parser |> run ~iter
+      | Lift_node {f; p; node; _} ->
+        let node, iter = node |> update_parse info ~pos ~parser:p in
+        lift_node ~f ~p node, iter
+      | Pratt_node {lookups; pratt_tree; _} ->
+        let pratt_tree, iter = update_pratt info ~pos ~lookups pratt_tree in
+        pratt_node ~lookups pratt_tree, iter
+      | App_node {p; q; left; right; _} ->
+        let mid_pos = pos + size_parse left in
+        if start > mid_pos then (* Update right only. *)
+          let right, iter = right |> update_parse info ~pos:mid_pos ~parser:q in
           app_node ~p ~q left right, iter
-        | App_node {p; q; left; right; _} -> (* Right. *)
-          let pos = pos + size_parse left in
-          let right, iter = right |> update_parse ~start ~added ~removed ~pos ~iter ~parser:q in
-          app_node ~p ~q left right, iter
+        else (* Update left and maybe right. *)
+          let left, iter = left |> update_parse info ~pos ~parser:p in
+          let pos = Iter_wrapper.pos iter in
+          (* Add to right = total to add - added to left. *)
+          let added = max 0 (added - pos + start) in
+          (* Remove from right = total to remove - removed from left. *)
+          let removed = max 0 (removed - mid_pos + start) in
+          if added = 0 && removed = 0 then (* Updated left only. *)
+            app_node ~p ~q left right, iter
+          else (* Update right as well. *)
+            let new_info = {start=pos; added; removed; iter} in
+            let right, iter = right |> update_parse new_info ~pos ~parser:q in
+            app_node ~p ~q left right, iter
 
-  and update_pratt : type a. start:int -> added:int -> removed:int -> pos:int ->
-    iter:'tok Iter_wrapper.t -> lookups:('tok, a) lookups -> ('tok, a) pratt_tree ->
-    ('tok, a) pratt_tree * 'tok Iter_wrapper.t =
-    fun ~start ~added ~removed ~pos ~iter ~lookups pratt_tree ->
+  and update_pratt : type a. 'tok update_info -> pos:int -> lookups:('tok, a) lookups ->
+    ('tok, a) pratt_tree -> ('tok, a) pratt_tree * 'tok Iter_wrapper.t =
+    fun ({start; added; removed; iter} as info) ~pos ~lookups pratt_tree ->
       let make_incr_state ~iter (right_nodes, right_pos) =
         {(make_state ~lookups ~iter) with right_nodes; right_pos}
       in
@@ -389,8 +400,7 @@ module Incremental = struct
         match node with
         | Combinators {parser; parse_tree; _} when start > pos ->
           (* The token that triggers this has size 1, so we increment pos. *)
-          let parse_tree, iter =
-            parse_tree |> update_parse ~start ~added ~removed ~pos:(pos + 1) ~iter ~parser in
+          let parse_tree, iter = parse_tree |> update_parse info ~pos:(pos + 1) ~parser in
           combinators ~parser ~parse_tree, make_incr_state ~iter right_info
         | Leaf _ as left when start > pos -> (* Right. *)
           right_info |> make_incr_state ~iter |> parse_infix ~prec left
@@ -408,11 +418,11 @@ module Incremental = struct
             | Infix {left; _} | Postfix {left; _} -> state |> parse_infix ~prec left
           end
       in
-      let pratt_tree, {iter; _} = pratt_tree |> incr_parse ~pos ~prec:max_int ~right_info:([], 0) in
-      pratt_tree, iter
+      let pratt_tree, state = pratt_tree |> incr_parse ~pos ~prec:max_int ~right_info:([], 0) in
+      pratt_tree, state |> get_iterator
 
   let update ~start ~added ~removed ~tokens {parser; parse_tree} =
-    let iter = Iter_wrapper.start_at start tokens in
-    let parse_tree, _ = parse_tree |> update_parse ~start ~added ~removed ~pos:0 ~iter ~parser in
+    let update_info = {start; added; removed; iter = Iter_wrapper.start_at start tokens} in
+    let parse_tree, _ = parse_tree |> update_parse update_info ~pos:0 ~parser in
     value_parse parse_tree, {parser; parse_tree}
 end

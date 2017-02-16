@@ -1,6 +1,6 @@
+open Gadt_rope
 open Incr_parsing
 open Combinators
-module F_array = Gadt_rope.Functional_array
 
 type token =
   | END
@@ -60,12 +60,12 @@ let expr = fix @@ fun expr ->
   pratt_parser prefixes ~infixes
 
 let f () =
-  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 4; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 2; IN; LET; IDENT "x"; EQUAL; INT_LIT 3; IN; IDENT "x"; EQUAL; IDENT "y"|] in
   let tokens = F_array.of_array a in
   let v1, incr = Incremental.make expr ~tokens in
-  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 4; PLUS; INT_LIT 2; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 2; FACT; IN; IDENT "x"; EQUAL; IDENT "y"|] in
   let tokens = F_array.of_array a in
-  let v2 = incr |> Incremental.update ~start:4 ~added:2 ~removed:0 ~tokens |> fst in
+  let v2 = incr |> Incremental.update ~start:4 ~added:1 ~removed:5 ~tokens |> fst in
   v1, v2
 
 (* TODO The (2 ^ 2) doesn't get reused here.
