@@ -25,8 +25,6 @@ module type S = sig
 
   val append : 'a t -> 'a t -> 'a t
 
-  val concat : 'a t list -> 'a t
-
   val split_exn : int -> 'a t -> 'a t * 'a t
 
   module Iterator : sig
@@ -96,45 +94,6 @@ module Make (C : Container) = struct
   let two l r = Two (l, r, size l + size r)
 
   let three l m r = Three (l, m, r, size l + size m + size r)
-
-  let rec concat_same_height : type n. ('a, n) tree list -> 'a t = fun nodes ->
-    let rec reduce : type n. ('a, n) tree -> ('a, n) tree -> ('a, n) tree list ->
-      ('a, n s) tree list -> ('a, n s) tree list = fun l r nodes acc ->
-      match nodes with
-      | [] -> List.rev (two l r :: acc)
-      | [r'] -> List.rev (three l r r' :: acc)
-      | l'::r'::nodes -> reduce l' r' nodes (two l r :: acc)
-    in
-    match nodes with
-    | [] -> Empty
-    | [tree] -> Tree tree
-    | l::r::nodes -> reduce l r nodes [] |> concat_same_height
-
-  let of_container c =
-    if (C.length c) <= max_leaf_size then leaf_flat_empty c
-    else
-      let rec list_leaves i acc =
-        if i <= max_leaf_size * 2 then
-          let i2 = i / 2 in
-          let c1 = leaf (C.sub c 0 i2) in
-          let c2 = leaf (C.sub c i2 (i - i2)) in
-          concat_same_height (c1::c2::acc)
-        else
-          let i' = i - max_leaf_size in list_leaves i' (leaf (C.sub c i' max_leaf_size) :: acc)
-      in
-      list_leaves (C.length c) []
-
-  let flatten = function
-    | Empty -> []
-    | Flat c -> [c]
-    | Tree tree ->
-      let rec inorder : type n. ('a, n) tree -> 'a C.t list -> 'a C.t list = fun xs acc ->
-        match xs with
-        | Leaf c -> c :: acc
-        | Two (l, r, _) -> acc |> inorder r |> inorder l
-        | Three (l, m, r, _) -> acc |> inorder r |> inorder m |> inorder l
-      in
-      inorder tree []
 
   let out_of_bounds = Invalid_argument "Index out of bounds."
 
@@ -241,34 +200,6 @@ module Make (C : Container) = struct
     | Tree tree, Flat c -> balance_right (down tree) (Short c) |> append_balanced_pair
     | Tree l, Tree r -> make_balanced_pair (down l) (down r) |> append_balanced_pair
 
-  let concat ts =
-    let rec rev_inorder : type n. ('a, n) tree -> 'a C.t list -> 'a C.t list = fun xs acc ->
-      match xs with
-      | Leaf c -> c :: acc
-      | Two (l, r, _) -> acc |> rev_inorder l |> rev_inorder r
-      | Three (l, m, r, _) -> acc |> rev_inorder r |> rev_inorder m |> rev_inorder l
-    in
-    (* NOTE this function is not very efficient if the list contains lots of containers of length 1
-       as it appends them all individually. Still O(n) time overall though. *)
-    let rec rev_concat_leaves cs acc = match cs with
-      | [] -> concat_same_height acc
-      | [c] -> append (leaf_flat_empty c) (concat_same_height acc)
-      | c::(d::ds as cs) ->
-        if C.length c < min_leaf_size then
-          let c = C.append d c in let len = C.length c in
-          if len > max_leaf_size then
-            let c, d = split_container c (len/2) in rev_concat_leaves ds (leaf c::leaf d::acc)
-          else rev_concat_leaves (c::ds) acc
-        else rev_concat_leaves cs (leaf c :: acc)
-    in
-    let rec concat ts acc = match ts with
-      | [] -> rev_concat_leaves acc []
-      | Empty :: tl -> concat tl acc
-      | Flat c :: tl -> concat tl (c::acc)
-      | Tree tree :: tl -> rev_inorder tree acc |> concat tl
-    in
-    concat ts []
-
   let split_exn i = function
     | Empty -> Empty, Empty
     | Flat c as t ->
@@ -321,6 +252,60 @@ module Make (C : Container) = struct
         | Short c -> flat c
       in
       let l, r = tree |> split i in convert_one_tree l, convert_one_tree r
+
+  let rec concat_same_height : type n. ('a, n) tree list -> 'a t = fun nodes ->
+    let rec reduce : type n. ('a, n) tree -> ('a, n) tree -> ('a, n) tree list ->
+      ('a, n s) tree list -> ('a, n s) tree list = fun l r nodes acc ->
+      match nodes with
+      | [] -> List.rev (two l r :: acc)
+      | [r'] -> List.rev (three l r r' :: acc)
+      | l'::r'::nodes -> reduce l' r' nodes (two l r :: acc)
+    in
+    match nodes with
+    | [] -> Empty
+    | [tree] -> Tree tree
+    | l::r::nodes -> reduce l r nodes [] |> concat_same_height
+
+  (* Turns a container into a list of leaves, assuming C.length c > max_leaf_size. *)
+  let list_leaves c =
+    let rec list_leaves i acc =
+      if i <= max_leaf_size * 2 then
+        let i2 = i / 2 in leaf (C.sub c 0 i2) :: leaf (C.sub c i2 (i - i2)) :: acc
+      else
+        let i = i - max_leaf_size in list_leaves i @@ leaf (C.sub c i max_leaf_size) :: acc
+    in
+    list_leaves (C.length c) []
+
+  let of_container c =
+    if (C.length c) <= max_leaf_size then leaf_flat_empty c
+    else list_leaves c |> concat_same_height
+
+  let of_container_list cs =
+    let rec make_leaves cs acc = match cs with
+      | [] -> List.rev acc, None
+      | [c] when C.length c < min_leaf_size -> List.rev acc, Some (Flat c)
+      | c::c'::cs when C.length c < min_leaf_size ->
+        make_leaves (C.append c c'::cs) acc
+      | c::cs when C.length c <= max_leaf_size -> make_leaves cs (leaf c :: acc)
+      | c::cs -> make_leaves cs @@ List.rev_append (list_leaves c) acc
+    in
+    let leaves, flat_o = make_leaves cs [] in
+    let tree = concat_same_height leaves in
+    match flat_o with
+    | None -> tree
+    | Some flat -> append tree flat
+
+  let flatten = function
+    | Empty -> []
+    | Flat c -> [c]
+    | Tree tree ->
+      let rec inorder : type n. ('a, n) tree -> 'a C.t list -> 'a C.t list = fun xs acc ->
+        match xs with
+        | Leaf c -> c :: acc
+        | Two (l, r, _) -> acc |> inorder r |> inorder l
+        | Three (l, m, r, _) -> acc |> inorder r |> inorder m |> inorder l
+      in
+      inorder tree []
 
   module Iterator = struct
     type 'a t = {
@@ -415,6 +400,8 @@ module F_array = struct
 
   let of_array = of_container
 
+  let of_array_list = of_container_list
+
   let to_array t = t |> flatten |> Array.concat
 end
 
@@ -437,6 +424,8 @@ module Rope = struct
 
   let of_string s = of_container (C_string.Str s)
 
+  let of_string_list ss = ss |> List.map (fun s -> C_string.Str s) |> of_container_list
+
   let to_string t = t |> flatten |> List.map (function C_string.Str s -> s) |> String.concat ""
 end
 
@@ -457,6 +446,7 @@ module One_rope = struct
 
   include Make (One_container)
 
+  (* Slightly more efficient than l |> of_container_list. *)
   let of_list l = l |> List.map leaf |> concat_same_height
 
   let to_list = flatten

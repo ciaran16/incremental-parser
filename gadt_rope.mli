@@ -11,8 +11,6 @@ module type S = sig
 
   val append : 'a t -> 'a t -> 'a t
 
-  val concat : 'a t list -> 'a t
-
   val split_exn : int -> 'a t -> 'a t * 'a t
 
   module Iterator : sig
@@ -48,6 +46,8 @@ module Make (C : Container) : sig
 
   val of_container : 'a C.t -> 'a t
 
+  val of_container_list : 'a C.t list -> 'a t
+
   val flatten : 'a t -> 'a C.t list
 end
 
@@ -56,6 +56,8 @@ module F_array : sig
 
   val of_array : 'a array -> 'a t
 
+  val of_array_list : 'a array list -> 'a t
+
   val to_array : 'a t -> 'a array
 end
 
@@ -63,6 +65,8 @@ module Rope : sig
   include S
 
   val of_string : string -> char t
+
+  val of_string_list : string list -> char t
 
   val to_string : char t -> string
 end
