@@ -4,7 +4,7 @@ open Combinators
 
 type token =
   | END
-  | INT_LIT of int
+  | INT of int
   | PLUS | MINUS | TIMES | POW | FACT
   | BOOL of bool
   | EQUAL | AND | OR
@@ -29,43 +29,41 @@ type expr =
   | Let of string * expr * expr
   | Var of string
 
-let if_ e1 e2 e3 = If (e1, e2, e3)
-
-let let_ x e1 e2 = Let (x, e1, e2)
-
-let ident = satisfy (function IDENT x -> Some x | _ -> None)
-
 let expr = fix @@ fun expr ->
+  let if_ e1 e2 e3 = If (e1, e2, e3) in
+  let let_ x e1 e2 = Let (x, e1, e2) in
+  let ident = satisfy (function IDENT x -> Some x | _ -> None) in
   let prefixes = function
-    | INT_LIT n -> Prefix.return (Int_lit n)
-    | BOOL b ->    Prefix.return (Bool_lit b)
-    | PLUS ->      Prefix.unary  (fun e -> e)
-    | MINUS ->     Prefix.unary  (fun e -> Neg e)
-    | IDENT x ->   Prefix.return (Var x)
-    | IF ->        Prefix.custom (if_ <$> expr <*> eat THEN *> expr <*> eat ELSE *> expr)
-    | LET ->       Prefix.custom (let_ <$> ident <*> eat EQUAL *> expr <*> eat IN *> expr)
-    | _ ->         Prefix.unknown
+    | INT n ->   Prefix.return (Int_lit n)
+    | BOOL b ->  Prefix.return (Bool_lit b)
+    | PLUS ->    Prefix.unary  (fun e -> e)
+    | MINUS ->   Prefix.unary  (fun e -> Neg e)
+    | IDENT x -> Prefix.return (Var x)
+    | PAREN_L -> Prefix.custom (expr <* eat PAREN_R)
+    | IF ->      Prefix.custom (if_ <$> expr <*> eat THEN *> expr <*> eat ELSE *> expr)
+    | LET ->     Prefix.custom (let_ <$> ident <*> eat EQUAL *> expr <*> eat IN *> expr)
+    | _ ->       Prefix.unknown
   in
   let infixes = function
-    | FACT ->   Infix.postfix (fun e -> Fact e)
-    | POW ->    Infix.right 1 (fun e1 e2 -> Pow (e1, e2))
-    | TIMES ->  Infix.left  2 (fun e1 e2 -> Times (e1, e2))
-    | PLUS ->   Infix.left  3 (fun e1 e2 -> Plus (e1, e2))
-    | MINUS ->  Infix.left  3 (fun e1 e2 -> Minus (e1, e2))
-    | EQUAL ->  Infix.left  4 (fun e1 e2 -> Equal (e1, e2))
-    | AND ->    Infix.right 5 (fun e1 e2 -> And (e1, e2))
-    | OR ->     Infix.right 6 (fun e1 e2 -> Or (e1, e2))
-    | _ ->      Infix.unknown
+    | FACT ->    Infix.postfix (fun e -> Fact e)
+    | POW ->     Infix.right 1 (fun e1 e2 -> Pow (e1, e2))
+    | TIMES ->   Infix.left  2 (fun e1 e2 -> Times (e1, e2))
+    | PLUS ->    Infix.left  3 (fun e1 e2 -> Plus (e1, e2))
+    | MINUS ->   Infix.left  3 (fun e1 e2 -> Minus (e1, e2))
+    | EQUAL ->   Infix.left  4 (fun e1 e2 -> Equal (e1, e2))
+    | AND ->     Infix.right 5 (fun e1 e2 -> And (e1, e2))
+    | OR ->      Infix.right 6 (fun e1 e2 -> Or (e1, e2))
+    | _ ->       Infix.unknown
   in
   pratt_parser prefixes ~infixes
 
 let f () =
-  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 2; IN; LET; IDENT "x"; EQUAL; INT_LIT 3; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let a = [|LET; IDENT "y"; EQUAL; INT 2; IN; LET; IDENT "x"; EQUAL; INT 3; IN; IDENT "y"|] in
   let tokens = F_array.of_array a in
   let v1, incr = Incremental.make expr ~tokens in
-  let a = [|LET; IDENT "y"; EQUAL; INT_LIT 2; FACT; IN; IDENT "x"; EQUAL; IDENT "y"|] in
+  let a = [|LET; IDENT "y"; EQUAL; PAREN_L; INT 2; PLUS; INT 3; PAREN_R; FACT; IN; IDENT "y"|] in
   let tokens = F_array.of_array a in
-  let v2 = incr |> Incremental.update ~start:4 ~added:1 ~removed:5 ~tokens |> fst in
+  let v2 = incr |> Incremental.update ~start:3 ~added:6 ~removed:6 ~tokens |> fst in
   v1, v2
 
 (* TODO The (2 ^ 2) doesn't get reused here.
