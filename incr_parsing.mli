@@ -35,12 +35,12 @@ module Prefix : sig
 
   val unary : ?prec:int -> ('a -> 'a) -> ('tok, 'a) prefix
 
-  val list : ('tok, 'a) parser -> ('a -> 'a -> 'a) -> sep:'tok -> stop:'tok -> wrap:('a -> 'b) ->
-    ('tok, 'b) prefix
-
   val custom : ('tok, 'a) parser -> ('tok, 'a) prefix
 
   val unknown : ('tok, 'a) prefix
+
+  val list : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('a F_array.t -> 'b) ->
+    ('tok, 'b) prefix
 end
 
 module Infix : sig

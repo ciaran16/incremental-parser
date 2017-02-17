@@ -1,5 +1,7 @@
+open Gadt_rope
+
 module Iter_wrapper = struct
-  module Iterator = Gadt_rope.F_array.Iterator
+  module Iterator = F_array.Iterator
 
   type 'tok t = {
     iter : 'tok Iterator.t;
@@ -313,13 +315,22 @@ module Prefix = struct
 
   let unknown = None
 
-  (* TODO Doesn't handle empty lists. If I allow empty infixes, make sep optional? *)
-  let list parser f ~sep ~stop ~wrap =
-    let open Combinators in
-    let infixes tok = if tok = sep then Infix.left 1 f else Infix.unknown in
-    let empty_prefix = custom parser in
-    let pratt = pratt_parser ~infixes ~empty_prefix (fun _ -> unknown) in
-    custom ((fun v _ -> wrap v) <$> pratt <*> eat stop)
+  open Combinators
+
+  (* TODO handling long lists without overflow. Option to handle trailing comma? *)
+  let list p ~sep ~close f =
+    let ps = fix @@ fun ps ->
+      pratt_parser (fun tok ->
+          if tok = sep then custom (List.cons <$> p <*> ps)
+          else if tok = close then return []
+          else unknown
+        )
+    in
+    let start =
+      let empty_prefix = custom (List.cons <$> p <*> ps) in
+      pratt_parser ~empty_prefix (fun tok -> if tok = close then return [] else unknown)
+    in
+    custom ((fun l -> l |> Array.of_list |> F_array.of_array |> f) <$> start)
 end
 
 module Non_incremental = struct
