@@ -1,4 +1,4 @@
-open Gadt_rope
+open Gadt_tree
 
 type ('tok, 'a) parser
 

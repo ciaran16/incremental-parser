@@ -1,4 +1,4 @@
-open Gadt_rope
+open Gadt_tree
 open Json_lexer
 open Incr_parsing
 open Combinators

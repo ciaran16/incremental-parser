@@ -1,7 +1,7 @@
 module type S = sig
   type 'a t
 
-  type 'a rope = 'a t
+  type 'a tree = 'a t
 
   val empty : 'a t
 
@@ -13,7 +13,7 @@ module type S = sig
 
   val get_exn : int -> 'a t -> 'a
 
-  val append : 'a t -> 'a t -> 'a t
+  val append : l:'a t -> r:'a t -> 'a t
 
   val concat : 'a t list -> 'a t
 
@@ -28,8 +28,8 @@ module type S = sig
   module Iterator : sig
     type 'a t
 
-    (** Returns [None] if the rope has length 0. *)
-    val start_at : int -> 'a rope -> 'a t option
+    (** Returns [None] if the tree has length 0. *)
+    val start_at : int -> 'a tree -> 'a t option
 
     val is_at_end : 'a t -> bool
 
@@ -94,7 +94,7 @@ module Rope : sig
   val default_printer : Format.formatter -> char t -> unit
 end
 
-module One_rope : sig
+module One_tree : sig
   include S
 
   val of_list : 'a list -> 'a t
