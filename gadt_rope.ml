@@ -109,9 +109,7 @@ module Make (C : Container) = struct
 
   let out_of_bounds = Invalid_argument "Index out of bounds."
 
-  let extract = function None -> raise out_of_bounds | Some x -> x
-
-  let safe f t = try Some (f t) with Invalid_argument _ -> None
+  let extract_exn = function None -> raise out_of_bounds | Some x -> x
 
   let subtree_at (type n) i : ('a, n s) tree -> ('a, n) tree * int = function
     | Two (l, r, _) ->
@@ -138,7 +136,7 @@ module Make (C : Container) = struct
         in
         tree |> get i
 
-  let get_exn i t = t |> get i |> extract
+  let get_exn i t = t |> get i |> extract_exn
 
   type ('a, 'n) append_result =
     | Done of ('a, 'n) tree
@@ -269,64 +267,72 @@ module Make (C : Container) = struct
     in
     ts |> concat Empty
 
-  let split_exn i = function
-    | Empty -> Empty, Empty
-    | Flat c as t ->
-      if i = 0 then Empty, t
-      else if i = C.length c then t, Empty
-      else let c1, c2 = split_container c i in flat c1, flat c2
-    | Tree tree ->
-      let rec split : type n. int -> ('a, n) tree ->
-        ('a, n) one_tree * ('a, n) one_tree = fun i node ->
-        let convert = function
-          | Done node -> One (Wrap node)
-          | Up (l, r) -> Wrap (two l r)
+  let split i t =
+    if i < 0 || i > length t then None
+    else if i = 0 then Some (Empty, t)
+    else if i = length t then Some (t, Empty)
+    else match t with
+      | Empty -> Some (Empty, Empty)
+      | Flat c -> let c1, c2 = split_container c i in Some (flat c1, flat c2)
+      | Tree tree ->
+        let rec split : type n. int -> ('a, n) tree ->
+          ('a, n) one_tree * ('a, n) one_tree = fun i node ->
+          let convert = function
+            | Done node -> One (Wrap node)
+            | Up (l, r) -> Wrap (two l r)
+          in
+          match node with
+          | Leaf c ->
+            assert (i > 0 && i < C.length c);
+            let short_or_leaf c = if C.length c < min_leaf_size then Short c else Wrap (leaf c) in
+            let c1, c2 = split_container c i in short_or_leaf c1, short_or_leaf c2
+          | Two (l, r, _) ->
+            let size_l = size l in
+            if i < size_l then let l, l' = l |> split i in One l, convert (append_left l' r)
+            else if i = size l then One (Wrap l), One (Wrap r)
+            else let r, r' = r |> split (i - size_l) in convert (append_right l r), One r'
+          | Three (l, m, r, _) ->
+            let size_l = size l in
+            let size_l_m = size_l + size m in
+            if i < size_l then
+              let l, l' = l |> split i in
+              let r = match append_left l' m with
+                | Done l -> two l r
+                | Up (l, m) -> three l m r
+              in
+              One l, Wrap r
+            else if i = size_l then One (Wrap l), Wrap (two m r)
+            else if i < size_l_m then
+              let m, m' = m |> split (i - size_l) in
+              convert (append_right l m), convert (append_left m' r)
+            else if i = size_l_m then Wrap (two l m), One (Wrap r)
+            else
+              let r, r' = r |> split (i - size_l_m) in
+              let l = match append_right m r with
+                | Done r -> two l r
+                | Up (m, r) -> three l m r
+              in
+              Wrap l, One r'
         in
-        let short_or_leaf c = if C.length c < min_leaf_size then Short c else Wrap (leaf c) in
-        match node with
-        | Leaf c ->
-          if i >= C.length c then raise out_of_bounds
-          else let c1, c2 = split_container c i in short_or_leaf c1, short_or_leaf c2
-        | Two (l, r, _) ->
-          let size_l = size l in
-          if i < size_l then let l, l' = l |> split i in One l, convert (append_left l' r)
-          else if i = size l then One (Wrap l), One (Wrap r)
-          else let r, r' = r |> split (i - size_l) in convert (append_right l r), One r'
-        | Three (l, m, r, _) ->
-          let size_l = size l in
-          let size_l_m = size_l + size m in
-          if i < size_l then
-            let l, l' = l |> split i in
-            let r = match append_left l' m with
-              | Done l -> two l r
-              | Up (l, m) -> three l m r
-            in
-            One l, Wrap r
-          else if i = size_l then One (Wrap l), Wrap (two m r)
-          else if i < size_l_m then
-            let m, m' = m |> split (i - size_l) in
-            convert (append_right l m), convert (append_left m' r)
-          else if i = size_l_m then Wrap (two l m), One (Wrap r)
-          else
-            let r, r' = r |> split (i - size_l_m) in
-            let l = match append_right m r with
-              | Done r -> two l r
-              | Up (m, r) -> three l m r
-            in
-            Wrap l, One r'
-      in
-      let rec convert_one_tree : type n. ('a, n) one_tree -> 'a t = function
-        | Wrap tree -> Tree tree
-        | One o -> convert_one_tree o
-        | Short c -> flat c
-      in
-      let l, r = tree |> split i in convert_one_tree l, convert_one_tree r
+        let rec convert_one_tree : type n. ('a, n) one_tree -> 'a t = function
+          | Wrap tree -> Tree tree
+          | One o -> convert_one_tree o
+          | Short c -> flat c
+        in
+        let l, r = tree |> split i in Some (convert_one_tree l, convert_one_tree r)
 
-  let split i = safe (split_exn i)
+  let split_exn i t = t |> split i |> extract_exn
 
-  let sub_exn i j t = t |> split_exn j |> fst |> split_exn i |> snd
+  let sub i j t =
+    (* TODO sub is O(log n) but constant factors could be lower. *)
+    match t |> split j with
+    | None -> None
+    | Some (t, _) ->
+      match t |> split i with
+      | None -> None
+      | Some (_, t) -> Some t
 
-  let sub i j = safe (sub_exn i j)
+  let sub_exn i j t = t |> sub i j |> extract_exn
 
   (* Turns a container into a list of leaves, assuming C.length c > max_leaf_size. *)
   let list_leaves c =
@@ -471,8 +477,10 @@ module F_array = struct
 end
 
 module Rope = struct
+  type 'a str = Str : string -> char str
+
   module String_container = struct
-    type 'a t = Str : string -> char t
+    type 'a t = 'a str
 
     let max_leaf_size = 512
 
@@ -487,8 +495,6 @@ module Rope = struct
 
   include Make (String_container)
 
-  open String_container
-
   let of_string s = of_container (Str s)
 
   let of_string_list ss = ss |> List.map (fun s -> Str s) |> of_container_list
@@ -496,6 +502,17 @@ module Rope = struct
   let to_string t = t |> flatten |> List.map (fun (Str s) -> s) |> String.concat ""
 
   let map f = map_containers (fun (Str s) -> Str (String.map f s))
+
+  let printer n fmt t =
+    let t =
+      if n < 0 then t
+      else match t |> sub 0 n with
+        | None -> t
+        | Some t -> append t (of_string "...")
+    in
+    Format.fprintf fmt "<rope \"%s\">" (to_string t)
+
+  let default_printer = printer 70
 end
 
 module One_rope = struct

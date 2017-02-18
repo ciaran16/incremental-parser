@@ -88,6 +88,10 @@ module Rope : sig
   val to_string : char t -> string
 
   val map : (char -> char) -> char t -> char t
+
+  val printer : int -> Format.formatter -> char t -> unit
+
+  val default_printer : Format.formatter -> char t -> unit
 end
 
 module One_rope : sig
