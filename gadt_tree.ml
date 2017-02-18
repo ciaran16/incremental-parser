@@ -52,6 +52,12 @@ module type Container = sig
   val sub : 'a t -> int -> int -> 'a t
 end
 
+exception Out_of_bounds of string
+
+let extract_exn s = function
+  | None -> raise (Out_of_bounds s)
+  | Some x -> x
+
 module Make (C : Container) = struct
   type z = Z
 
@@ -107,10 +113,6 @@ module Make (C : Container) = struct
 
   let three l m r = Three (l, m, r, size l + size m + size r)
 
-  let out_of_bounds = Invalid_argument "Index out of bounds."
-
-  let extract_exn = function None -> raise out_of_bounds | Some x -> x
-
   let subtree_at (type n) i : ('a, n s) node -> ('a, n) node * int = function
     | Two (l, r, _) ->
       let size_l = size l in
@@ -136,7 +138,7 @@ module Make (C : Container) = struct
         in
         node |> get i
 
-  let get_exn i t = t |> get i |> extract_exn
+  let get_exn i t = t |> get i |> extract_exn "get_exn"
 
   type ('a, 'n) append_result =
     | Done of ('a, 'n) node
@@ -323,7 +325,7 @@ module Make (C : Container) = struct
         in
         let l, r = node |> split i in Some (convert_one_node l, convert_one_node r)
 
-  let split_exn i t = t |> split i |> extract_exn
+  let split_exn i t = t |> split i |> extract_exn "split_exn"
 
   let sub i j t =
     (* TODO sub is O(log n) but constant factors could be lower. *)
@@ -334,7 +336,7 @@ module Make (C : Container) = struct
       | None -> None
       | Some (_, t) -> Some t
 
-  let sub_exn i j t = t |> sub i j |> extract_exn
+  let sub_exn i j t = t |> sub i j |> extract_exn "sub_exn"
 
   (* Turns a container into a list of leaves, assuming C.length c > max_leaf_size. *)
   let list_leaves c =
@@ -475,6 +477,8 @@ module F_array = struct
 
   let to_array t = t |> flatten |> Array.concat
 
+  let of_list l = l |> Array.of_list |> of_array
+
   let map f = map_containers (Array.map f)
 end
 
@@ -540,4 +544,94 @@ module One_tree = struct
   let to_list = flatten
 
   let map f = map_containers f
+end
+
+module Insert_tree (T : sig
+    include S
+
+    val of_list : 'a list -> 'a t
+  end) = struct
+  let max_length = 1000
+
+  type 'a t =
+    | Tree of 'a T.t
+    | Split of {
+        l : 'a T.t;
+        ms : 'a list; (* Reversed list of inserted values. *)
+        r : 'a T.t;
+        len : int;
+      }
+
+  type 'a tree = 'a t
+
+  let empty = Tree T.empty
+
+  let of_tree tree = Tree tree
+
+  let to_tree = function
+    | Tree tree -> tree
+    | Split {l; ms; r; _} -> T.concat [l; T.of_list (List.rev ms); r]
+
+  let split_with_m ~l ~m ~ms ~r ~len =
+    let len = len + 1 in
+    let t = Split {l; ms = m::ms; r; len} in
+    if len = max_length then t |> to_tree |> of_tree else (print_endline "quick insert"; t)
+
+  let start ~l ~m ~r = Split {l; ms = [m]; r; len = 1}
+
+  let insert_single m ~i = function
+    | Split ({l; ms; r; len} as split) when i = T.length l + len ->
+      Some (split_with_m ~l ~m ~ms ~r ~len)
+    | Tree _ | Split _ as t ->
+      begin match t |> to_tree |> T.split i with
+        | None -> None
+        | Some (l, r) -> Some (start ~l ~m ~r)
+      end
+
+  let insert_single_exn m ~i t = t |> insert_single m ~i |> extract_exn "insert_single_exn"
+
+  let append_single m = function
+    | Split ({l; ms; r; len} as split) when r = T.empty -> split_with_m ~l ~m ~ms ~r ~len
+    | Tree _ | Split _ as t -> start ~l:(to_tree t) ~m ~r:T.empty
+
+  let max_leaf_size = T.max_leaf_size
+
+  let length = function
+    | Tree tree -> T.length tree
+    | Split {l; r; len; _} -> T.length l + len + T.length r
+
+  let get i = function
+    | Tree tree -> tree |> T.get i
+    | Split {l; ms; r; len} ->
+      let len_l = T.length l in
+      if i < len_l then l |> T.get i
+      else if i < len_l + len then
+        (* The list is reversed and i is increased by len_l. *)
+        let i = len - 1 - (i - len_l) in Some (List.nth ms i)
+      else r |> T.get (i - len_l - len)
+
+  let get_exn i t = t |> get i |> extract_exn "get_exn"
+
+  let append ~l ~r = T.append ~l:(to_tree l) ~r:(to_tree r) |> of_tree
+
+  let concat ts = ts |> List.map to_tree |> T.concat |> of_tree
+
+  let split i t =
+    match t |> to_tree |> T.split i with
+    | None -> None
+    | Some (l, r) -> Some (of_tree l, of_tree r)
+
+  let split_exn i t = let l, r = t |> to_tree |> T.split_exn i in of_tree l, of_tree r
+
+  let sub i j t = match t |> to_tree |> T.sub i j with
+    | None -> None
+    | Some t -> Some (of_tree t)
+
+  let sub_exn i j t = t |> to_tree |> T.sub_exn i j |> of_tree
+
+  module Iterator = struct
+    include T.Iterator
+
+    let start_at i t = t |> to_tree |> T.Iterator.start_at i
+  end
 end

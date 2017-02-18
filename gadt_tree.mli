@@ -1,3 +1,5 @@
+exception Out_of_bounds of string
+
 module type S = sig
   type 'a t
 
@@ -45,7 +47,8 @@ module type Container = sig
 
   val max_leaf_size : int
 
-  val length : 'a t -> int (** Must take O(1) time. *)
+  (** Must take O(1) time. *)
+  val length : 'a t -> int
 
   val get : 'a t -> int -> 'a
 
@@ -75,6 +78,8 @@ module F_array : sig
 
   val to_array : 'a t -> 'a array
 
+  val of_list : 'a list -> 'a t
+
   val map : ('a -> 'b) -> 'a t -> 'b t
 end
 
@@ -102,4 +107,25 @@ module One_tree : sig
   val to_list : 'a t -> 'a list
 
   val map : ('a -> 'b) -> 'a t -> 'b t
+end
+
+module Insert_tree (Tree : sig
+    include S
+
+    val of_list : 'a list -> 'a t
+  end) : sig
+  include S
+
+  val of_tree : 'a Tree.t -> 'a t
+
+  val to_tree : 'a t -> 'a Tree.t
+
+  (** Amortised O(1) time when inserting consecutive items. *)
+  val insert_single : 'a -> i:int -> 'a t -> 'a t option
+
+  val insert_single_exn : 'a -> i:int -> 'a t -> 'a t
+
+  val append_single : 'a -> 'a t -> 'a t
+
+  val prepend_single : 'a -> 'a t -> 'a t
 end
