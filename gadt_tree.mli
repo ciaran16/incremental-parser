@@ -1,13 +1,13 @@
 exception Out_of_bounds of string
 
+val extract_exn : string -> 'a option -> 'a
+
 module type S = sig
   type 'a t
 
   type 'a tree = 'a t
 
   val empty : 'a t
-
-  val max_leaf_size : int
 
   val length : 'a t -> int
 
@@ -66,6 +66,8 @@ module Make (C : Container) : sig
 
   val flatten : 'a t -> 'a C.t list
 
+  val flatten_map : ('a C.t -> 'b) -> 'a t -> 'b list
+
   val map_containers : ('a C.t -> 'b C.t) -> 'a t -> 'b t
 
   val repeat_to : int -> 'a t -> 'a t
@@ -94,6 +96,8 @@ module Rope : sig
 
   val of_string : string -> char t
 
+  val of_char : char -> char t
+
   val of_string_list : string list -> char t
 
   val to_string : char t -> string
@@ -121,21 +125,20 @@ module One_tree : sig
   val map : ('a -> 'b) -> 'a t -> 'b t
 end
 
-module Insert_tree (Tree : sig
-    include S
-
-    val of_list : 'a list -> 'a t
-  end) : sig
+module Quick_tree (Tree : S) : sig
   include S
 
   val of_tree : 'a Tree.t -> 'a t
 
   val to_tree : 'a t -> 'a Tree.t
+end
 
-  (** Amortised O(1) time when inserting consecutive items. *)
-  val insert_single : 'a -> i:int -> 'a t -> 'a t option
+module Zipped_trees (L : S) (R : S) : sig
+  include S
 
-  val insert_single_exn : 'a -> i:int -> 'a t -> 'a t
+  val create : l:'a L.t -> r:'b R.t -> ('a * 'b) t
 
-  val append_single : 'a -> 'a t -> 'a t
+  val left : ('a * 'b) t -> 'a L.t
+
+  val right : ('a * 'b) t -> 'b R.t
 end
