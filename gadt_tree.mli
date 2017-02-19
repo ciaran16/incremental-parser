@@ -67,6 +67,10 @@ module Make (C : Container) : sig
   val flatten : 'a t -> 'a C.t list
 
   val map_containers : ('a C.t -> 'b C.t) -> 'a t -> 'b t
+
+  val repeat_to : int -> 'a t -> 'a t
+  (** [repeat_to n t] creates a tree of length n consisting of t repeated.
+      Useful for creating [make] function. Runs in O(log n) time. *)
 end
 
 module F_array : sig
@@ -80,6 +84,8 @@ module F_array : sig
 
   val of_list : 'a list -> 'a t
 
+  val make : int -> 'a -> 'a t
+
   val map : ('a -> 'b) -> 'a t -> 'b t
 end
 
@@ -92,6 +98,8 @@ module Rope : sig
 
   val to_string : char t -> string
 
+  val make : int -> char -> char t
+
   val map : (char -> char) -> char t -> char t
 
   val printer : int -> Format.formatter -> char t -> unit
@@ -102,9 +110,13 @@ end
 module One_tree : sig
   include S
 
+  val singleton : 'a -> 'a t
+
   val of_list : 'a list -> 'a t
 
   val to_list : 'a t -> 'a list
+
+  val make : int -> 'a -> 'a t
 
   val map : ('a -> 'b) -> 'a t -> 'b t
 end
@@ -126,6 +138,4 @@ module Insert_tree (Tree : sig
   val insert_single_exn : 'a -> i:int -> 'a t -> 'a t
 
   val append_single : 'a -> 'a t -> 'a t
-
-  val prepend_single : 'a -> 'a t -> 'a t
 end

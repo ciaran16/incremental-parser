@@ -391,6 +391,14 @@ module Make (C : Container) = struct
       in
       Node (map_node node)
 
+  let rec repeat_to len = function
+    | Empty -> invalid_arg "repeat_to - trying to repeat the empty tree."
+    | Flat c -> leaf_flat_empty (c ^^ c) |> repeat_to len
+    | Node node as t ->
+      match t |> sub 0 len with
+      | None -> Node (two node node) |> repeat_to len
+      | Some t -> t
+
   module Iterator = struct
     type 'a t = {
       path_o : ('a, z) path option;
@@ -479,6 +487,10 @@ module F_array = struct
 
   let of_list l = l |> Array.of_list |> of_array
 
+  let make len a =
+    if len <= max_leaf_size then of_array (Array.make len a)
+    else Array.make max_leaf_size a |> of_array |> repeat_to len
+
   let map f = map_containers (Array.map f)
 end
 
@@ -506,6 +518,10 @@ module Rope = struct
   let of_string_list ss = ss |> List.map (fun s -> Str s) |> of_container_list
 
   let to_string t = t |> flatten |> List.map (fun (Str s) -> s) |> String.concat ""
+
+  let make len c =
+    if len <= max_leaf_size then of_string (String.make len c)
+    else String.make max_leaf_size c |> of_string |> repeat_to len
 
   let map f = map_containers (fun (Str s) -> Str (String.map f s))
 
@@ -538,10 +554,14 @@ module One_tree = struct
 
   include Make (One_container)
 
+  let singleton = of_container
+
   (* Slightly more efficient than l |> of_container_list. *)
   let of_list l = l |> List.map leaf |> concat_same_height
 
   let to_list = flatten
+
+  let make len a = singleton a |> repeat_to len
 
   let map f = map_containers f
 end
