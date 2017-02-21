@@ -1,25 +1,46 @@
 open Gadt_tree
 
+module Balanced_tree = struct
+  module Zipped = Zipped_trees (F_array) (F_array)
+
+  include Append_tree (Zipped)
+end
+
 module Iter_wrapper = struct
   module Iterator = F_array.Iterator
 
   type 'tok t = {
     iter : 'tok Iterator.t;
     pos : int;
+    peek : ('tok * 'tok Iterator.t) Lazy.t;
   }
+
+  let make iter pos = {iter; pos; peek = lazy (Iterator.next iter)}
 
   let start_at pos tokens =
     match tokens |> Iterator.start_at pos with
     | None -> failwith "No tokens given to parser - there should be at least an end token."
-    | Some iter -> {iter; pos}
+    | Some iter -> make iter pos
 
-  let next {iter; pos} = let next, iter = Iterator.next iter in next, {iter; pos=pos+1}
+  let next {pos; peek; _} =
+    let next, iter = Lazy.force peek in
+    next, make iter (pos + 1)
 
-  let peek {iter; _} = Iterator.next iter |> fst
+  let peek {peek; _} = Lazy.force peek |> fst
 
-  let skip n {iter; pos} = let iter = iter |> Iterator.skip n in {iter; pos=pos+n}
+  let skip n {iter; pos; _} = make (iter |> Iterator.skip n) (pos + n)
 
   let pos {pos; _} = pos
+end
+
+module Type = struct
+  type (_, _) is_equal =
+    | Equal : ('a, 'a) is_equal
+    | Not_equal : ('a, 'b) is_equal
+
+  let equal = Equal
+
+  let not_equal = Not_equal
 end
 
 type ('tok, _) parser =
@@ -31,7 +52,7 @@ type ('tok, _) parser =
   | Pratt : ('tok, 'a) lookups -> ('tok, 'a) parser
   | Fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
 
-and ('tok, _) parse_tree =
+and ('tok, 'a) parse_tree =
   | Value : 'a -> ('tok, 'a) parse_tree
   | App_node : {
       p : ('tok, 'a -> 'b) parser;
@@ -85,6 +106,12 @@ and ('tok, 'a) pratt_tree =
       value : 'a;
       size : int;
     }
+  (*| Balanced : {
+      prec : int;
+      f : 'b F_array.t -> 'a;
+      tree : (('tok, 'a) pratt_tree * 'b) Balanced_tree.t;
+      size : int;
+    } -> ('tok, 'a) pratt_tree*)
 
 and ('tok, 'a) state = {
   lookups : ('tok, 'a) lookups;
@@ -259,20 +286,30 @@ let rec run : type tok a. iter:tok Iter_wrapper.t -> (tok, a) parser ->
     f (Fix f) |> run ~iter
 
 module Infix = struct
-  let pratt_infix ~is_left prec f =
+  let left prec f =
     prec,
     fun left state ->
-      let prec = if is_left then prec else prec + 1 in
       let right, state = state |> parse_prefix ~prec in
       infix ~prec ~f left right, state
 
-  let left prec f = pratt_infix ~is_left:true prec f
-
-  let right prec f = pratt_infix ~is_left:false prec f
+  let right prec f =
+    prec,
+    fun left state ->
+      let right, state = state |> parse_prefix ~prec:(prec + 1) in
+      infix ~prec:(prec + 1) ~f left right, state
 
   let postfix ?(prec=(-2)) f =
     prec,
     fun left state -> postfix ~prec ~f left, state
+
+  (*let balanced prec =
+    prec,
+    fun left state ->
+      (* TODO check if this makes it not use up stack space. However may be slower.
+         Could possibly do a combination of the two? *)
+      let prec = prec + 1 in
+      let right, state = state |> parse_prefix ~prec in
+      balanced ~prec left right, state*)
 
   let unknown = max_int, fun _left _state -> assert false
 end
@@ -315,22 +352,23 @@ module Prefix = struct
 
   let unknown = None
 
-  open Combinators
-
-  (* TODO handling long lists without overflow. Option to handle trailing comma? *)
+  (* TODO Option to handle trailing comma?
   let list p ~sep ~close f =
+    let nil = Balanced_tree.empty value_parse in
     let ps = fix @@ fun ps ->
-      pratt_parser (fun tok ->
-          if tok = sep then custom (List.cons <$> p <*> ps)
-          else if tok = close then return []
-          else unknown
-        )
+      let prefixes tok =
+        if tok = sep then custom (Balanced_tree.cons <$> p <*> ps)
+        else if tok = close then return nil
+        else unknown
+      in
+      pratt_parser prefixes
     in
     let start =
-      let empty_prefix = custom (List.cons <$> p <*> ps) in
-      pratt_parser ~empty_prefix (fun tok -> if tok = close then return [] else unknown)
+      let prefixes tok = if tok = close then return nil else unknown in
+      let empty_prefix = custom (Balanced_tree.cons <$> p <*> ps) in
+      pratt_parser prefixes ~empty_prefix
     in
-    custom ((fun l -> l |> Array.of_list |> F_array.of_array |> f) <$> start)
+     custom (f <$> start) *)
 end
 
 module Non_incremental = struct

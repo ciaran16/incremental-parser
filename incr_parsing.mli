@@ -6,6 +6,14 @@ type ('tok, 'a) prefix
 
 type ('tok, 'a) infix
 
+module Type : sig
+  type ('a, 'b) is_equal
+
+  val equal : ('a, 'a) is_equal
+
+  val not_equal : ('a, 'b) is_equal
+end
+
 module Combinators : sig
   val pratt_parser :
     ?empty_prefix:('tok, 'a) prefix ->
