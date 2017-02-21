@@ -60,20 +60,20 @@ and ('tok, 'a) parse_tree =
       left : ('tok, 'a -> 'b) parse_tree;
       right : ('tok, 'a) parse_tree;
       value : 'b;
-      size : int;
+      len : int;
     } -> ('tok, 'b) parse_tree
   | Lift_node : {
       f : ('a -> 'b);
       p : ('tok, 'a) parser;
       node : ('tok, 'a) parse_tree;
       value : 'b;
-      size : int;
+      len : int;
     } -> ('tok, 'b) parse_tree
   | Pratt_node : {
       lookups : ('tok, 'a) lookups;
       pratt_tree : ('tok, 'a) pratt_tree;
       value : 'a;
-      size : int;
+      len : int;
     } -> ('tok, 'a) parse_tree
 
 and ('tok, 'a) pratt_tree =
@@ -83,7 +83,7 @@ and ('tok, 'a) pratt_tree =
       f : 'a -> 'a;
       right : ('tok, 'a) pratt_tree;
       value : 'a;
-      size : int;
+      len : int;
     }
   | Infix of {
       prec : int;
@@ -91,26 +91,26 @@ and ('tok, 'a) pratt_tree =
       left : ('tok, 'a) pratt_tree;
       right : ('tok, 'a) pratt_tree;
       value : 'a;
-      size : int;
+      len : int;
     }
   | Postfix of {
       prec : int;
       f : 'a -> 'a;
       left : ('tok, 'a) pratt_tree;
       value : 'a;
-      size : int;
+      len : int;
     }
   | Combinators of {
       parser : ('tok, 'a) parser;
       parse_tree : ('tok, 'a) parse_tree;
       value : 'a;
-      size : int;
+      len : int;
     }
   (*| Balanced : {
       prec : int;
       f : 'b F_array.t -> 'a;
       tree : (('tok, 'a) pratt_tree * 'b) Balanced_tree.t;
-      size : int;
+      len : int;
     } -> ('tok, 'a) pratt_tree*)
 
 and ('tok, 'a) state = {
@@ -136,40 +136,40 @@ let value_parse = function
   | Value v -> v
   | App_node {value; _} | Lift_node {value; _} | Pratt_node {value; _} -> value
 
-let size_parse : type a. ('tok, a) parse_tree -> int = function
+let length_parse : type a. ('tok, a) parse_tree -> int = function
   | Value _ -> 1
-  | App_node {size; _} | Lift_node {size; _} | Pratt_node {size; _} -> size
+  | App_node {len; _} | Lift_node {len; _} | Pratt_node {len; _} -> len
 
 let value_pratt = function
   | Leaf v -> v
   | Prefix {value; _} | Infix {value; _} | Postfix {value; _} | Combinators {value; _} -> value
 
-let size_pratt = function
+let length_pratt = function
   | Leaf _ -> 1
-  | Prefix {size; _} | Infix {size; _} | Postfix {size; _} | Combinators {size; _} -> size
+  | Prefix {len; _} | Infix {len; _} | Postfix {len; _} | Combinators {len; _} -> len
 
 let app_node ~p ~q left right =
   let value = value_parse left (value_parse right) in
-  App_node {p; q; left; right; value; size=size_parse left + size_parse right}
+  App_node {p; q; left; right; value; len = length_parse left + length_parse right}
 
 let lift_node ~f ~p node =
-  Lift_node {f; p; node; value=f (value_parse node); size=size_parse node}
+  Lift_node {f; p; node; value = f (value_parse node); len = length_parse node}
 
 let pratt_node ~lookups pratt_tree =
-  Pratt_node {lookups; pratt_tree; value=value_pratt pratt_tree; size=size_pratt pratt_tree}
+  Pratt_node {lookups; pratt_tree; value = value_pratt pratt_tree; len = length_pratt pratt_tree}
 
 let prefix ~prec ~f right =
-  Prefix {prec; f; right; value = f (value_pratt right); size = size_pratt right + 1}
+  Prefix {prec; f; right; value = f (value_pratt right); len = length_pratt right + 1}
 
 let infix ~prec ~f left right =
   let value = f (value_pratt left) (value_pratt right) in
-  Infix {prec; f; left; right; value; size = size_pratt left + size_pratt right + 1}
+  Infix {prec; f; left; right; value; len = length_pratt left + length_pratt right + 1}
 
 let postfix ~prec ~f left =
-  Postfix {prec; f; left; value = f (value_pratt left); size = size_pratt left + 1}
+  Postfix {prec; f; left; value = f (value_pratt left); len = length_pratt left + 1}
 
 let combinators ~parser ~parse_tree =
-  Combinators {parser; parse_tree; value=value_parse parse_tree; size=size_parse parse_tree}
+  Combinators {parser; parse_tree; value = value_parse parse_tree; len = length_parse parse_tree}
 
 let make_state ~lookups ~iter = {lookups; iter; right_nodes=[]; right_pos=0}
 
@@ -184,13 +184,13 @@ let advance ({iter; right_nodes; right_pos; _} as state) =
     | _::_ when pos <= right_pos -> right_nodes, right_pos
     | (Leaf _ | Postfix _ | Combinators _)::right_nodes -> right_nodes, right_pos + 1
     | (Prefix {right; _} | Infix {right; _})::right_nodes ->
-      let next_right_pos = right_pos + size_pratt right + 1 in
+      let next_right_pos = right_pos + length_pratt right + 1 in
       if next_right_pos <= pos then right_nodes, next_right_pos
       else
         let right_pos =
           match right with
           | Leaf _ | Prefix _ | Combinators _ -> right_pos + 1
-          | Infix {left; _} | Postfix {left; _} -> right_pos + 1 + size_pratt left
+          | Infix {left; _} | Postfix {left; _} -> right_pos + 1 + length_pratt left
         in
         right::right_nodes, right_pos
   in
@@ -203,15 +203,15 @@ let lookup_empty_prefix {lookups={empty_prefix; _}; _} = empty_prefix
 let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iter_wrapper.peek iter)
 
 let check_for_node ({iter; right_nodes; right_pos; _} as state) =
-  let size_right = function
-    | Leaf _ | Prefix _ | Combinators _ as node -> size_pratt node
-    | Infix {right; _} -> size_pratt right + 1
+  let length_right = function
+    | Leaf _ | Prefix _ | Combinators _ as node -> length_pratt node
+    | Infix {right; _} -> length_pratt right + 1
     | Postfix _ -> 1
   in
   let pos = Iter_wrapper.pos iter in
   match right_nodes with
   | node::right_nodes when pos = right_pos ->
-    let iter = iter |> Iter_wrapper.skip (size_right node) in
+    let iter = iter |> Iter_wrapper.skip (length_right node) in
     Some (node, {state with iter; right_nodes; right_pos=pos})
   | _ -> None
 
@@ -408,11 +408,11 @@ module Incremental = struct
         let pratt_tree, iter = update_pratt info ~pos ~lookups pratt_tree in
         pratt_node ~lookups pratt_tree, iter
       | App_node {p; q; left; right; _} ->
-        let mid_pos = pos + size_parse left in
+        let mid_pos = pos + length_parse left in
         if start > mid_pos then (* Update right only. *)
           let right, iter = right |> update_parse info ~pos:mid_pos ~parser:q in
           app_node ~p ~q left right, iter
-        else (* Update left and maybe right. *)
+        else (* Update left and if necessary update right. *)
           let left, iter = left |> update_parse info ~pos ~parser:p in
           let pos = Iter_wrapper.pos iter in
           (* Add to right = total to add - added to left. *)
@@ -435,7 +435,7 @@ module Incremental = struct
       let rec incr_parse ~prec ~pos:last_pos ~right_info node =
         let pos = match node with
           | Leaf _ | Prefix _ | Combinators _ -> last_pos
-          | Infix {left; _} | Postfix {left; _} -> last_pos + size_pratt left
+          | Infix {left; _} | Postfix {left; _} -> last_pos + length_pratt left
         in
         let go_right ~prec:prec' ~f make right =
           let right, state = right |> incr_parse ~prec:prec' ~pos:(pos + 1) ~right_info in
@@ -448,7 +448,7 @@ module Incremental = struct
         in
         match node with
         | Combinators {parser; parse_tree; _} when start > pos ->
-          (* The token that triggers this has size 1, so we increment pos. *)
+          (* The token that triggers this has a length, so we increase pos by length. *)
           let parse_tree, iter = parse_tree |> update_parse info ~pos:(pos + 1) ~parser in
           combinators ~parser ~parse_tree, make_incr_state ~iter right_info
         | Leaf _ as left when start > pos -> (* Right. *)

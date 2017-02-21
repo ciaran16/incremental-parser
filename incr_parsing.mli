@@ -46,9 +46,6 @@ module Prefix : sig
   val custom : ('tok, 'a) parser -> ('tok, 'a) prefix
 
   val unknown : ('tok, 'a) prefix
-
-  val list : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('a F_array.t -> 'b) ->
-    ('tok, 'b) prefix
 end
 
 module Infix : sig
