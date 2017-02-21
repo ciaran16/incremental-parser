@@ -409,10 +409,11 @@ module Make (C : Container) = struct
       | Some t -> t
 
   module Iterator = struct
-    type 'a t = {
+    type 'a t = int * 'a info
+
+    and 'a info = {
       path_o : ('a, z) path option;
       c : 'a C.t;
-      i : int;
       ended : bool;
     }
 
@@ -430,7 +431,7 @@ module Make (C : Container) = struct
         get i' (Down {path; node; offset = offset + i - i'})
       in
       match path with
-      | Down {node=Leaf c; _} -> {path_o=Some path; c; i; ended = i >= C.length c}
+      | Down {node=Leaf c; _} -> (i, {path_o = Some path; c; ended = i >= C.length c})
       | Top (Two _ as node) -> down node ~path ~offset:0
       | Top (Three _ as node) -> down node ~path ~offset:0
       | Down {node=Two _ as node; offset; _} -> down node ~path ~offset
@@ -450,24 +451,24 @@ module Make (C : Container) = struct
 
     let start_at pos = function
       | Empty -> None
-      | Flat c -> Some ({path_o=None; c; i=pos; ended=false})
-      | Node (Leaf c) -> Some ({path_o=None; c; i=pos; ended=false})
+      | Flat c -> Some (pos, {path_o = None; c; ended = false})
+      | Node (Leaf c) -> Some (pos, {path_o = None; c; ended = false})
       | Node (Two _ as node) -> Some ((Top node) |> get pos)
       | Node (Three _ as node) -> Some ((Top node) |> get pos)
 
     let is_at_end {ended; _} = ended
 
-    let next ({path_o; c; i; ended} as t) =
+    let next (i, ({path_o; c; ended} as info) as t) =
       let i_last = C.length c - 1 in
-      if i <= i_last then C.get c i, {t with i = i + 1}
+      if i <= i_last then C.get c i, (i + 1, info)
       else if ended then C.get c i_last, t
       else match path_o with
-        | None -> C.get c i_last, {t with ended=true}
+        | None -> C.get c i_last, (i, {info with ended = true})
         | Some path ->
-          let ({c; i; ended; _} as t) = path |> move i in
-          C.get c (if ended then C.length c - 1 else i), {t with i = i + 1}
+          let (i, ({c; ended; _} as info)) = path |> move i in
+          C.get c (if ended then C.length c - 1 else i), (i + 1, info)
 
-    let skip n ({i; _} as t) = {t with i = i + n}
+    let skip n (i, info) = (i + n, info)
   end
 end
 
@@ -576,7 +577,7 @@ module One_tree = struct
   let map f = map_containers f
 end
 
-module Quick_tree (T : S) = struct
+module Append_tree (T : S) = struct
   type 'a t = {
     ls : 'a T.t list;
     m : 'a T.t;
@@ -677,11 +678,15 @@ module Zipped_trees (L : S) (R : S) = struct
     | [] -> Empty
     | Empty::ts -> concat ts
     | Pair (l, r)::ts ->
-      let rec concat_pairs : type a b c. (a, b * c) eql -> b L.t list -> c R.t list -> a t list ->
+      let rec concat_pairs : type b c. (a, b * c) eql -> b L.t list -> c R.t list -> a t list ->
         a t = fun eql ls rs ts -> match ts, eql with
-        | [], Refl -> Pair (L.concat (List.rev ls), R.concat (List.rev rs))
+        | [], Refl ->
+          (* This has type (b * c) t, but Refl tells us this is equavalent to type a t. *)
+          Pair (L.concat (List.rev ls), R.concat (List.rev rs))
         | Empty::ts, _ -> concat_pairs eql ls rs ts
-        | Pair (l, r)::ts, Refl -> concat_pairs eql (l::ls) (r::rs) ts
+        | Pair (l, r)::ts, Refl ->
+          (* (l, r) has type a, so Refl tells us that l has type b and r has type c. *)
+          concat_pairs eql (l::ls) (r::rs) ts
       in
       concat_pairs Refl [l] [r] ts
 

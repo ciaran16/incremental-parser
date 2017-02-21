@@ -125,7 +125,7 @@ module One_tree : sig
   val map : ('a -> 'b) -> 'a t -> 'b t
 end
 
-module Quick_tree (Tree : S) : sig
+module Append_tree (Tree : S) : sig
   include S
 
   val of_tree : 'a Tree.t -> 'a t
