@@ -456,7 +456,7 @@ module Make (C : Container) = struct
       | Node (Two _ as node) -> Some ((Top node) |> get pos)
       | Node (Three _ as node) -> Some ((Top node) |> get pos)
 
-    let is_at_end {ended; _} = ended
+    let is_at_end (_, {ended; _}) = ended
 
     let next (i, ({path_o; c; ended} as info) as t) =
       let i_last = C.length c - 1 in
