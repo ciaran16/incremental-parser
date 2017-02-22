@@ -17,7 +17,8 @@ module Lexer : sig
 
   val pos : 'tok t -> int
 
-  val next : 'tok t -> 'tok * 'tok t
+  val next : 'tok t -> 'tok * int * 'tok t
+  (** Returns a tuple of the form [(token, token_length, lexer)] *)
 
   val peek : 'tok t -> 'tok
 

@@ -62,12 +62,12 @@ let expr = fix @@ fun expr ->
   pratt_parser prefixes ~infixes
 
 let f () =
-  let a = [INT 2; PLUS; INT 3; TIMES; INT 4; PLUS; INT 5] in
+  let a = [IF; BOOL true; THEN; INT 2; PLUS; INT 3] in
   let lexer = Incr_lexing.of_list a in
   let v1, incr = Incremental.make expr ~lexer in
-  let a = [INT 2; PLUS; INT 4; POW; INT 2; PLUS; INT 5] in
+  let a = [IF; BOOL true; THEN; INT 2; ELSE; INT 3] in
   let lexer = Incr_lexing.of_list a in
-  let v2 = incr |> Incremental.update ~start:2 ~added:3 ~removed:3 ~lexer |> fst in
+  let v2 = incr |> Incremental.update ~start:4 ~added:1 ~removed:1 ~lexer |> fst in
   v1, v2
 
 (* TODO The (2 ^ 2) doesn't get reused here.

@@ -37,7 +37,8 @@ module Lexer = struct
 
   let pos {pos; _} = pos
 
-  let next {lex; next = lazy (token, pos); _} = token, make_at pos lex
+  let next {lex; pos; next = lazy (token, pos')} =
+    token, pos' - pos, make_at pos' lex
 
   let peek {next = lazy (token, _); _} = token
 
