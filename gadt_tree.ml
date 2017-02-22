@@ -65,9 +65,11 @@ module type Container = sig
 end
 
 module Make (C : Container) = struct
-  type z = Z
+  include struct [@@@warning "-37"]
+    type z
 
-  type 'n s = S
+    type 'n s = S
+  end
 
   type ('a, _) node =
     | Leaf : 'a C.t -> ('a, z) node
@@ -672,21 +674,21 @@ module Zipped_trees (L : S) (R : S) = struct
     | t, Empty | Empty, t -> t
     | Pair (l1, r1), Pair (l2, r2) -> Pair (L.append ~l:l1 ~r:l2, R.append ~l:r1 ~r:r2)
 
-  type (_, _) eql = Refl : ('a, 'a) eql
+  type (_, _) eq = Refl : ('a, 'a) eq
 
   let rec concat : type a. a t list -> a t = function
     | [] -> Empty
     | Empty::ts -> concat ts
     | Pair (l, r)::ts ->
-      let rec concat_pairs : type b c. (a, b * c) eql -> b L.t list -> c R.t list -> a t list ->
-        a t = fun eql ls rs ts -> match ts, eql with
+      let rec concat_pairs : type b c. (a, b * c) eq -> b L.t list -> c R.t list -> a t list ->
+        a t = fun eq ls rs ts -> match ts, eq with
         | [], Refl ->
           (* This has type (b * c) t, but Refl tells us this is equavalent to type a t. *)
           Pair (L.concat (List.rev ls), R.concat (List.rev rs))
-        | Empty::ts, _ -> concat_pairs eql ls rs ts
+        | Empty::ts, _ -> concat_pairs eq ls rs ts
         | Pair (l, r)::ts, Refl ->
           (* (l, r) has type a, so Refl tells us that l has type b and r has type c. *)
-          concat_pairs eql (l::ls) (r::rs) ts
+          concat_pairs eq (l::ls) (r::rs) ts
       in
       concat_pairs Refl [l] [r] ts
 
