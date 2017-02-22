@@ -1,47 +1,24 @@
 open Gadt_tree
 
+module Tags = struct
+  type (_, _) eq =
+    | Equal : ('a, 'a) eq
+    | Not_equal : ('a, 'b) eq
+
+  module Lift (T : sig type 'a t end) = struct
+    let f : type a b. (a, b) eq -> (a T.t, b T.t) eq = function
+      | Equal -> Equal
+      | Not_equal -> Not_equal
+  end
+end
+
 module Balanced_tree = struct
   module Zipped = Zipped_trees (F_array) (F_array)
 
   include Append_tree (Zipped)
 end
 
-module Iter_wrapper = struct
-  module Iterator = F_array.Iterator
-
-  type 'tok t = {
-    iter : 'tok Iterator.t;
-    pos : int;
-    peek : ('tok * 'tok Iterator.t) Lazy.t;
-  }
-
-  let make iter pos = {iter; pos; peek = lazy (Iterator.next iter)}
-
-  let start_at pos tokens =
-    match tokens |> Iterator.start_at pos with
-    | None -> failwith "No tokens given to parser - there should be at least an end token."
-    | Some iter -> make iter pos
-
-  let next {pos; peek; _} =
-    let next, iter = Lazy.force peek in
-    next, make iter (pos + 1)
-
-  let peek {peek; _} = Lazy.force peek |> fst
-
-  let skip n {iter; pos; _} = make (iter |> Iterator.skip n) (pos + n)
-
-  let pos {pos; _} = pos
-end
-
-module Type = struct
-  type (_, _) is_equal =
-    | Equal : ('a, 'a) is_equal
-    | Not_equal : ('a, 'b) is_equal
-
-  let equal = Equal
-
-  let not_equal = Not_equal
-end
+module Lexer = Incr_lexing.Lexer
 
 type ('tok, _) parser =
   | Eat : 'tok -> ('tok, 'tok) parser
@@ -52,8 +29,13 @@ type ('tok, _) parser =
   | Pratt : ('tok, 'a) lookups -> ('tok, 'a) parser
   | Fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
 
+(* TODO factor out value and len? *)
+
 and ('tok, 'a) parse_tree =
-  | Value : 'a -> ('tok, 'a) parse_tree
+  | Basic_node : {
+      value : 'a;
+      len : int;
+    } -> ('tok, 'a) parse_tree
   | App_node : {
       p : ('tok, 'a -> 'b) parser;
       q : ('tok, 'a) parser;
@@ -77,7 +59,10 @@ and ('tok, 'a) parse_tree =
     } -> ('tok, 'a) parse_tree
 
 and ('tok, 'a) pratt_tree =
-  | Leaf of 'a
+  | Leaf of {
+      value : 'a;
+      len : int;
+    }
   | Prefix of {
       prec : int;
       f : 'a -> 'a;
@@ -115,9 +100,7 @@ and ('tok, 'a) pratt_tree =
 
 and ('tok, 'a) state = {
   lookups : ('tok, 'a) lookups;
-  iter : 'tok Iter_wrapper.t;
-  right_nodes : ('tok, 'a) pratt_tree list;
-  right_pos : int;
+  lexer : 'tok Lexer.t;
 }
 
 and ('tok, 'a) lookups = {
@@ -132,52 +115,60 @@ and ('tok, 'a) prefix = ('tok, 'a) state_f option
 
 and ('tok, 'a) infix = int * (('tok, 'a) pratt_tree -> ('tok, 'a) state_f)
 
-let value_parse = function
-  | Value v -> v
-  | App_node {value; _} | Lift_node {value; _} | Pratt_node {value; _} -> value
+module Node = struct
+  let value = function
+    | Basic_node {value; _} | App_node {value; _} | Lift_node {value; _}
+    | Pratt_node {value; _} -> value
 
-let length_parse : type a. ('tok, a) parse_tree -> int = function
-  | Value _ -> 1
-  | App_node {len; _} | Lift_node {len; _} | Pratt_node {len; _} -> len
+  let length : type a. ('tok, a) parse_tree -> int = function
+    | Basic_node {len; _} | App_node {len; _} | Lift_node {len; _} | Pratt_node {len; _} -> len
 
-let value_pratt = function
-  | Leaf v -> v
-  | Prefix {value; _} | Infix {value; _} | Postfix {value; _} | Combinators {value; _} -> value
+  let basic value = Basic_node {value; len = 1}
 
-let length_pratt = function
-  | Leaf _ -> 1
-  | Prefix {len; _} | Infix {len; _} | Postfix {len; _} | Combinators {len; _} -> len
+  let app ~p ~q left right =
+    let value = value left (value right) in
+    App_node {p; q; left; right; value; len = length left + length right}
 
-let app_node ~p ~q left right =
-  let value = value_parse left (value_parse right) in
-  App_node {p; q; left; right; value; len = length_parse left + length_parse right}
+  let lift ~f ~p node =
+    Lift_node {f; p; node; value = f (value node); len = length node}
 
-let lift_node ~f ~p node =
-  Lift_node {f; p; node; value = f (value_parse node); len = length_parse node}
+  let pratt_value = function
+    | Leaf {value; _} | Prefix {value; _} | Infix {value; _} | Postfix {value; _}
+    | Combinators {value; _} -> value
 
-let pratt_node ~lookups pratt_tree =
-  Pratt_node {lookups; pratt_tree; value = value_pratt pratt_tree; len = length_pratt pratt_tree}
+  let pratt_length = function
+    | Leaf {len; _} | Prefix {len; _} | Infix {len; _} | Postfix {len; _}
+    | Combinators {len; _} -> len
 
-let prefix ~prec ~f right =
-  Prefix {prec; f; right; value = f (value_pratt right); len = length_pratt right + 1}
+  let pratt ~lookups pratt_tree =
+    Pratt_node {lookups; pratt_tree; value = pratt_value pratt_tree; len = pratt_length pratt_tree}
+end
 
-let infix ~prec ~f left right =
-  let value = f (value_pratt left) (value_pratt right) in
-  Infix {prec; f; left; right; value; len = length_pratt left + length_pratt right + 1}
+module Pratt = struct
+  let value = Node.pratt_value
 
-let postfix ~prec ~f left =
-  Postfix {prec; f; left; value = f (value_pratt left); len = length_pratt left + 1}
+  let length = Node.pratt_length
 
-let combinators ~parser ~parse_tree =
-  Combinators {parser; parse_tree; value = value_parse parse_tree; len = length_parse parse_tree}
+  let leaf value = Leaf {value; len = 1}
 
-let make_state ~lookups ~iter = {lookups; iter; right_nodes=[]; right_pos=0}
+  let prefix ~prec ~f right =
+    Prefix {prec; f; right; value = f (value right); len = length right + 1}
 
-let get_iterator {iter; _} = iter
+  let infix ~prec ~f left right =
+    let value = f (value left) (value right) in
+    Infix {prec; f; left; right; value; len = length left + length right + 1}
 
-let advance ({iter; right_nodes; right_pos; _} as state) =
-  let iter = iter |> Iter_wrapper.next |> snd in
-  let pos = Iter_wrapper.pos iter in
+  let postfix ~prec ~f left =
+    Postfix {prec; f; left; value = f (value left); len = length left + 1}
+
+  let combinators ~parser ~parse_tree =
+    Combinators {parser; parse_tree; value = Node.value parse_tree; len = Node.length parse_tree}
+end
+
+(*
+let advance ({lexer; right_nodes; right_pos; _} as state) =
+  let lexer = lexer |> Lexer.next |> snd in
+  let pos = Lexer.pos lexer in
   let right_nodes, right_pos =
     match right_nodes with
     | [] -> right_nodes, right_pos
@@ -194,29 +185,23 @@ let advance ({iter; right_nodes; right_pos; _} as state) =
         in
         right::right_nodes, right_pos
   in
-  {state with iter; right_nodes; right_pos}
+  {state with lexer; right_nodes; right_pos}
 
-let lookup_prefix {lookups={prefixes; _}; iter; _} = prefixes (Iter_wrapper.peek iter)
-
-let lookup_empty_prefix {lookups={empty_prefix; _}; _} = empty_prefix
-
-let lookup_infix {lookups={infixes; _}; iter; _} = infixes (Iter_wrapper.peek iter)
-
-let check_for_node ({iter; right_nodes; right_pos; _} as state) =
+let check_for_node ({lexer; right_nodes; right_pos; _} as state) =
   let length_right = function
     | Leaf _ | Prefix _ | Combinators _ as node -> length_pratt node
     | Infix {right; _} -> length_pratt right + 1
     | Postfix _ -> 1
   in
-  let pos = Iter_wrapper.pos iter in
+  let pos = Lexer.pos lexer in
   match right_nodes with
   | node::right_nodes when pos = right_pos ->
-    let iter = iter |> Iter_wrapper.skip (length_right node) in
-    Some (node, {state with iter; right_nodes; right_pos=pos})
+    let lexer = lexer |> Lexer.skip (length_right node) in
+    Some (node, {state with lexer; right_nodes; right_pos=pos})
   | _ -> None
 
-let log_reuse s {iter; _} =
-  print_endline @@ "Reusing " ^ s ^ " at pos " ^ string_of_int (Iter_wrapper.pos iter) ^ "."
+let log_reuse s {lexer; _} =
+  print_endline @@ "Reusing " ^ s ^ " at pos " ^ string_of_int (Lexer.pos lexer) ^ "."
 
 let get_prefix_node state =
   match state |> check_for_node with
@@ -231,76 +216,72 @@ let get_infix_node ~prec:last_prec left state =
   | Some (Postfix {prec; f; _}, state) when prec < last_prec ->
     log_reuse "postfix" state; Some (postfix ~prec ~f left, state)
   | _ -> None
+*)
 
-let rec parse_infix ~prec left state =
-  match state |> get_infix_node ~prec left with
-  | Some (left, state) -> state |> parse_infix ~prec left
-  | None ->
-    let next_prec, infix = state |> lookup_infix in
-    if next_prec >= prec then left, state
-    else
-      let node, state = state |> advance |> infix left in
-      state |> parse_infix ~prec node
+let rec parse_infix ~prec left ({lookups = {infixes; _}; lexer; _} as state) =
+  let token, lexer = lexer |> Lexer.next in
+  let next_prec, infix = infixes token in
+  if next_prec >= prec then left, state
+  else
+    let node, state = infix left {state with lexer} in
+    state |> parse_infix ~prec node
 
-let parse_prefix ~prec state =
+let parse_prefix ~prec ({lookups = {prefixes; empty_prefix; _}; lexer; _} as state) =
+  let token, lexer = lexer |> Lexer.next in
   let left, state =
-    match state |> get_prefix_node with
-    | Some r -> r
+    match prefixes token with
+    | Some prefix -> prefix {state with lexer}
     | None ->
-      match state |> lookup_prefix with
-      | Some prefix -> state |> advance |> prefix
-      | None ->
-        match state |> lookup_empty_prefix with
-        | Some prefix -> state |> prefix
-        | None ->
-          failwith ("Unexpected prefix at pos " ^ string_of_int (Iter_wrapper.pos state.iter))
+      match empty_prefix with
+      | Some prefix -> prefix state
+      | None -> failwith ("Unexpected prefix at pos " ^ string_of_int (Lexer.pos state.lexer))
   in
   state |> parse_infix ~prec left
 
 let pratt_parse state = state |> parse_prefix ~prec:max_int
 
-let rec run : type tok a. iter:tok Iter_wrapper.t -> (tok, a) parser ->
-  (tok, a) parse_tree * tok Iter_wrapper.t = fun ~iter ->
-  let fail s = failwith @@ s ^ " failed at pos " ^ (string_of_int @@ Iter_wrapper.pos iter) ^ "." in
-  function
+let rec run : type tok a. lexer:tok Lexer.t -> (tok, a) parser ->
+  (tok, a) parse_tree * tok Lexer.t = fun ~lexer parser ->
+  let fail s = failwith @@ s ^ " failed at pos " ^ (string_of_int @@ Lexer.pos lexer) ^ "." in
+  match parser with
   | Eat tok ->
-    let tok', iter = iter |> Iter_wrapper.next in
-    if tok = tok' then Value tok, iter else fail "Eat"
+    let tok', lexer = lexer |> Lexer.next in
+    if tok = tok' then Node.basic tok, lexer else fail "Eat"
   | Any ->
-    let tok, iter = iter |> Iter_wrapper.next in Value tok, iter
+    let tok, lexer = lexer |> Lexer.next in Node.basic tok, lexer
   | Satisfy f ->
-    let tok, iter = iter |> Iter_wrapper.next in begin match f tok with
-      | Some v -> Value v, iter
+    let tok, lexer = lexer |> Lexer.next in begin match f tok with
+      | Some v -> Node.basic v, lexer
       | None -> fail "Satisfy"
     end
   | App (p, q) ->
-    let left, iter = p |> run ~iter in
-    let right, iter = q |> run ~iter in
-    app_node ~p ~q left right, iter
+    let left, lexer = p |> run ~lexer in
+    let right, lexer = q |> run ~lexer in
+    Node.app ~p ~q left right, lexer
   | Lift (f, p) ->
-    let node, iter = p |> run ~iter in lift_node ~f ~p node, iter
+    let node, lexer = p |> run ~lexer in Node.lift ~f ~p node, lexer
   | Pratt lookups ->
-    let parse_tree, {iter; _} = make_state ~lookups ~iter |> pratt_parse in
-    pratt_node ~lookups parse_tree, iter
+    let parse_tree, {lexer; _} = pratt_parse {lookups; lexer} in
+    Node.pratt ~lookups parse_tree, lexer
   | Fix f ->
-    f (Fix f) |> run ~iter
+    f (Fix f) |> run ~lexer
 
 module Infix = struct
   let left prec f =
     prec,
     fun left state ->
       let right, state = state |> parse_prefix ~prec in
-      infix ~prec ~f left right, state
+      Pratt.infix ~prec ~f left right, state
 
   let right prec f =
     prec,
     fun left state ->
       let right, state = state |> parse_prefix ~prec:(prec + 1) in
-      infix ~prec:(prec + 1) ~f left right, state
+      Pratt.infix ~prec:(prec + 1) ~f left right, state
 
   let postfix ?(prec=(-2)) f =
     prec,
-    fun left state -> postfix ~prec ~f left, state
+    fun left state -> Pratt.postfix ~prec ~f left, state
 
   (*let balanced prec =
     prec,
@@ -338,17 +319,16 @@ end
 module Prefix = struct
   let some x = Some x
 
-  let return v = some @@ fun state -> Leaf v, state
+  let return v = some @@ fun state -> Pratt.leaf v, state
 
   let unary ?(prec=(-1)) f = some @@ fun state ->
     let right, state = state |> parse_prefix ~prec in
-    prefix ~prec ~f right, state
+    Pratt.prefix ~prec ~f right, state
 
-  let custom parser = some @@ fun ({lookups; _} as state) ->
-    let iter = state |> get_iterator in
-    let parse_tree, iter = parser |> run ~iter in
+  let custom parser = some @@ fun ({lexer; _} as state) ->
+    let parse_tree, lexer = parser |> run ~lexer in
     (* TODO need to carry across right nodes. *)
-    combinators ~parser ~parse_tree, make_state ~lookups ~iter
+    Pratt.combinators ~parser ~parse_tree, {state with lexer}
 
   let unknown = None
 
@@ -372,11 +352,11 @@ module Prefix = struct
 end
 
 module Non_incremental = struct
-  let build_tree ~tokens parser =
-    let iter = Iter_wrapper.start_at 0 tokens in
-    parser |> run ~iter |> fst
+  let build_tree ~lexer parser =
+    let lexer = Lexer.make lexer in
+    parser |> run ~lexer |> fst
 
-  let run ~tokens parser = parser |> build_tree ~tokens |> value_parse
+  let run ~lexer parser = parser |> build_tree ~lexer |> Node.value
 end
 
 module Incremental = struct
@@ -389,53 +369,56 @@ module Incremental = struct
     start : int;
     added : int;
     removed : int;
-    iter : 'tok Iter_wrapper.t
+    lexer : 'tok Lexer.t
   }
 
-  let make ~tokens parser =
-    let parse_tree = parser |> Non_incremental.build_tree ~tokens in
-    value_parse parse_tree, {parser; parse_tree}
+  let make ~lexer parser =
+    let parse_tree = parser |> Non_incremental.build_tree ~lexer in
+    Node.value parse_tree, {parser; parse_tree}
 
   let rec update_parse : type a. 'tok update_info -> pos:int -> parser:('tok, a) parser ->
-    ('tok, a) parse_tree -> ('tok, a) parse_tree * 'tok Iter_wrapper.t =
-    fun ({start; added; removed; iter} as info) ~pos ~parser -> function
-      | Value _ as node ->
-        if start > pos then node, iter else parser |> run ~iter
+    ('tok, a) parse_tree -> ('tok, a) parse_tree * 'tok Lexer.t =
+    fun ({start; added; removed; lexer} as info) ~pos ~parser -> function
+      | Basic_node _ as node ->
+        assert (start >= pos);
+        if start > pos then node, lexer
+        else parser |> run ~lexer:(Lexer.move_to pos lexer)
       | Lift_node {f; p; node; _} ->
-        let node, iter = node |> update_parse info ~pos ~parser:p in
-        lift_node ~f ~p node, iter
+        let node, lexer = node |> update_parse info ~pos ~parser:p in
+        Node.lift ~f ~p node, lexer
       | Pratt_node {lookups; pratt_tree; _} ->
-        let pratt_tree, iter = update_pratt info ~pos ~lookups pratt_tree in
-        pratt_node ~lookups pratt_tree, iter
+        let pratt_tree, lexer = update_pratt info ~pos ~lookups pratt_tree in
+        Node.pratt ~lookups pratt_tree, lexer
       | App_node {p; q; left; right; _} ->
-        let mid_pos = pos + length_parse left in
+        let mid_pos = pos + Node.length left in
         if start > mid_pos then (* Update right only. *)
-          let right, iter = right |> update_parse info ~pos:mid_pos ~parser:q in
-          app_node ~p ~q left right, iter
-        else (* Update left and if necessary update right. *)
-          let left, iter = left |> update_parse info ~pos ~parser:p in
-          let pos = Iter_wrapper.pos iter in
+          let right, lexer = right |> update_parse info ~pos:mid_pos ~parser:q in
+          Node.app ~p ~q left right, lexer
+        else (* Update left and, if necessary, update right. *)
+          let left, lexer = left |> update_parse info ~pos ~parser:p in
+          let pos = Lexer.pos lexer in
           (* Add to right = total to add - added to left. *)
           let added = max 0 (added - pos + start) in
           (* Remove from right = total to remove - removed from left. *)
           let removed = max 0 (removed - mid_pos + start) in
-          if added = 0 && removed = 0 then (* Updated left only. *)
-            app_node ~p ~q left right, iter
+          if added = 0 && removed = 0 then
+            Node.app ~p ~q left right, lexer
           else (* Update right as well. *)
-            let new_info = {start=pos; added; removed; iter} in
-            let right, iter = right |> update_parse new_info ~pos ~parser:q in
-            app_node ~p ~q left right, iter
+            let new_info = {start = pos; added; removed; lexer} in
+            let right, lexer = right |> update_parse new_info ~pos ~parser:q in
+            Node.app ~p ~q left right, lexer
 
   and update_pratt : type a. 'tok update_info -> pos:int -> lookups:('tok, a) lookups ->
-    ('tok, a) pratt_tree -> ('tok, a) pratt_tree * 'tok Iter_wrapper.t =
-    fun ({start; added; removed; iter} as info) ~pos ~lookups pratt_tree ->
-      let make_incr_state ~iter (right_nodes, right_pos) =
-        {(make_state ~lookups ~iter) with right_nodes; right_pos}
-      in
+    ('tok, a) pratt_tree -> ('tok, a) pratt_tree * 'tok Lexer.t =
+    fun ({start; added; removed; lexer} as info) ~pos ~lookups pratt_tree ->
       let rec incr_parse ~prec ~pos:last_pos ~right_info node =
         let pos = match node with
           | Leaf _ | Prefix _ | Combinators _ -> last_pos
-          | Infix {left; _} | Postfix {left; _} -> last_pos + length_pratt left
+          | Infix {left; _} | Postfix {left; _} -> last_pos + Pratt.length left
+        in
+        let make_incr_state ~lexer right_info =
+          let lexer = lexer |> Lexer.move_to pos in
+          {lookups; lexer}
         in
         let go_right ~prec:prec' ~f make right =
           let right, state = right |> incr_parse ~prec:prec' ~pos:(pos + 1) ~right_info in
@@ -448,30 +431,30 @@ module Incremental = struct
         in
         match node with
         | Combinators {parser; parse_tree; _} when start > pos ->
-          (* The token that triggers this has a length, so we increase pos by length. *)
-          let parse_tree, iter = parse_tree |> update_parse info ~pos:(pos + 1) ~parser in
-          combinators ~parser ~parse_tree, make_incr_state ~iter right_info
+          (* The token that triggers this has a length, so we increase pos by this length. *)
+          let parse_tree, lexer = parse_tree |> update_parse info ~pos:(pos + 1) ~parser in
+          Pratt.combinators ~parser ~parse_tree, make_incr_state ~lexer right_info
         | Leaf _ as left when start > pos -> (* Right. *)
-          right_info |> make_incr_state ~iter |> parse_infix ~prec left
+          right_info |> make_incr_state ~lexer |> parse_infix ~prec left
         | Prefix {prec; f; right; _} when start > pos ->
-          go_right ~prec ~f prefix right
+          go_right ~prec ~f Pratt.prefix right
         | Infix {prec; f; left; right; _} when start > pos ->
-          go_right ~prec ~f (infix left) right
+          go_right ~prec ~f (Pratt.infix left) right
         | Infix {left; _} | Postfix {left; _} when start < pos -> (* Left. *)
           left |> incr_parse ~prec ~pos:last_pos ~right_info:(right_info |> add_right node)
         | Leaf _ | Prefix _ | Infix _ | Postfix _ | Combinators _ -> (* Hit. *)
           assert (start = pos);
-          let state = right_info |> add_right node |> make_incr_state ~iter in
+          let state = right_info |> add_right node |> make_incr_state ~lexer in
           begin match node with
             | Leaf _ | Prefix _ | Combinators _ -> state |> parse_prefix ~prec
             | Infix {left; _} | Postfix {left; _} -> state |> parse_infix ~prec left
           end
       in
       let pratt_tree, state = pratt_tree |> incr_parse ~pos ~prec:max_int ~right_info:([], 0) in
-      pratt_tree, state |> get_iterator
+      pratt_tree, state.lexer
 
-  let update ~start ~added ~removed ~tokens {parser; parse_tree} =
-    let update_info = {start; added; removed; iter = Iter_wrapper.start_at start tokens} in
+  let update ~start ~added ~removed ~lexer ({parser; parse_tree} as t) =
+    let update_info = {start; added; removed; lexer = Lexer.make lexer} in
     let parse_tree, _ = parse_tree |> update_parse update_info ~pos:0 ~parser in
-    value_parse parse_tree, {parser; parse_tree}
+    Node.value parse_tree, {t with parse_tree}
 end

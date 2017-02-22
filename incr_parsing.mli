@@ -1,18 +1,18 @@
-open Gadt_tree
+module Tags : sig
+  type (_, _) eq =
+    | Equal : ('a, 'a) eq
+    | Not_equal : ('a, 'b) eq
+
+  module Lift (T : sig type 'a t end) : sig
+    val f : ('a, 'b) eq -> ('a T.t, 'b T.t) eq
+  end
+end
 
 type ('tok, 'a) parser
 
 type ('tok, 'a) prefix
 
 type ('tok, 'a) infix
-
-module Type : sig
-  type ('a, 'b) is_equal
-
-  val equal : ('a, 'a) is_equal
-
-  val not_equal : ('a, 'b) is_equal
-end
 
 module Combinators : sig
   val pratt_parser :
@@ -59,14 +59,14 @@ module Infix : sig
 end
 
 module Non_incremental : sig
-  val run : tokens:'tok F_array.t -> ('tok, 'a) parser -> 'a
+  val run : lexer:'tok Incr_lexing.lexer -> ('tok, 'a) parser -> 'a
 end
 
 module Incremental : sig
   type ('tok, 'a) t
 
-  val make : tokens:'tok F_array.t -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
+  val make : lexer:'tok Incr_lexing.lexer -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
 
-  val update : start:int -> added:int -> removed:int -> tokens:'tok F_array.t -> ('tok, 'a) t ->
-    'a * ('tok, 'a) t
+  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.lexer ->
+    ('tok, 'a) t -> 'a * ('tok, 'a) t
 end
