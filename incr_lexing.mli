@@ -4,12 +4,18 @@ val token : 'tok -> 'tok lex_result
 
 val error : ?token:'tok -> string -> 'tok lex_result
 
-type 'tok lex_f = int -> 'tok lex_result * int
+type 'tok lexer = int -> 'tok lex_result * int
+
+val of_list : 'tok list -> 'tok lexer
 
 module Lexer : sig
   type 'tok t
 
-  val start_at : int -> 'tok lex_f -> 'tok t
+  val make : 'tok lexer -> 'tok t
+
+  val make_at : int -> 'tok lexer -> 'tok t
+
+  val pos : 'tok t -> int
 
   val next : 'tok t -> 'tok * 'tok t
 
@@ -17,5 +23,5 @@ module Lexer : sig
 
   val skip : int -> 'tok t -> 'tok t
 
-  val pos : 'tok t -> int
+  val move_to : int -> 'tok t -> 'tok t
 end
