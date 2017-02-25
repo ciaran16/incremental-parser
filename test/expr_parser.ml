@@ -1,16 +1,6 @@
+open Expr_lexer
 open Incr_parsing
 open Combinators
-
-type token =
-  | END
-  | INT of int
-  | PLUS | MINUS | TIMES | POW | FACT
-  | BOOL of bool
-  | EQUAL | AND | OR
-  | PAREN_L | PAREN_R
-  | IF | THEN | ELSE
-  | LET | IN
-  | IDENT of string
 
 type expr =
   | Int_lit of int
@@ -60,23 +50,3 @@ let expr = fix @@ fun expr ->
     | _ ->       Infix.unknown
   in
   pratt_parser prefixes ~infixes
-
-let f () =
-  let a = [IF; BOOL true; THEN; INT 2; PLUS; INT 3] in
-  let lexer = Incr_lexing.of_list a in
-  let v1, incr = Incremental.make expr ~lexer in
-  let a = [IF; BOOL true; THEN; INT 2; ELSE; INT 3] in
-  let lexer = Incr_lexing.of_list a in
-  let v2 = incr |> Incremental.update ~start:4 ~added:1 ~removed:1 ~lexer |> fst in
-  v1, v2
-
-(* TODO The (2 ^ 2) doesn't get reused here.
-let g () =
-  let l = [INT_LIT 1; PLUS; INT_LIT 2; POW; INT_LIT 2; TIMES; INT_LIT 3; PLUS; INT_LIT 4] in
-  let tokens = F_array.of_list l in
-  let v1, incr = Incremental.make expr ~tokens ~end_token:END in
-  let start = 1 in
-  let tokens = tokens |> F_array.delete_exn start |> F_array.insert_exn start MINUS |> F_array.insert_exn (start + 1) (INT_LIT 0) |> Gadt_rope.insert_exn (start + 2) TIMES in
-  let v2, _incr = incr |> Incremental.update ~start ~added:3 ~removed:1 ~tokens in
-   v1, v2
-*)
