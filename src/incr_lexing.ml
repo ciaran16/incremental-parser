@@ -39,7 +39,7 @@ module Lexer = struct
     let last_pos_ref = ref 0 in
     let lex_at pos =
       let lexbuf =
-        if pos <> !last_pos_ref then lexbuf_ref := make_lexbuf_at pos else print_endline "reusing lexbuf";
+        if pos <> !last_pos_ref then lexbuf_ref := make_lexbuf_at pos;
         !lexbuf_ref
       in
       (* The position given by lexbuf may differ from pos. *)
