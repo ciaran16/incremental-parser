@@ -8,6 +8,7 @@ type expr =
   | Plus of expr * expr
   | Minus of expr * expr
   | Times of expr * expr
+  | Divide of expr * expr
   | Pow of expr * expr
   | Fact of expr
   | Bool_lit of bool
@@ -42,6 +43,7 @@ let expr = fix @@ fun expr ->
     | FACT ->    Infix.postfix (fun e -> Fact e)
     | POW ->     Infix.right 1 (fun e1 e2 -> Pow (e1, e2))
     | TIMES ->   Infix.left  2 (fun e1 e2 -> Times (e1, e2))
+    | DIVIDE ->  Infix.left  2 (fun e1 e2 -> Divide (e1, e2))
     | PLUS ->    Infix.left  3 (fun e1 e2 -> Plus (e1, e2))
     | MINUS ->   Infix.left  3 (fun e1 e2 -> Minus (e1, e2))
     | EQUAL ->   Infix.left  4 (fun e1 e2 -> Equal (e1, e2))
