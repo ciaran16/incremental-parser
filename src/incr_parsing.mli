@@ -60,15 +60,25 @@ module Infix : sig
   val unknown : ('tok, 'a) infix
 end
 
+module Parse_tree : sig
+  type 'a t
+
+  val to_ast : 'a t -> 'a
+
+  val length : 'a t -> int
+end
+
 module Non_incremental : sig
-  val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> 'a
+  val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> 'a Parse_tree.t
 end
 
 module Incremental : sig
   type ('tok, 'a) t
 
-  val make : lexer:'tok Incr_lexing.lexer -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
+  val make : lexer:'tok Incr_lexing.Lexer.t -> ('tok, 'a) parser -> ('tok, 'a) t
+
+  val parse_tree : ('tok, 'a) t -> 'a Parse_tree.t
 
   val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.Lexer.t ->
-    ('tok, 'a) t -> 'a * ('tok, 'a) t
+    ('tok, 'a) t -> ('tok, 'a) t
 end

@@ -237,16 +237,26 @@ end
 let pratt_parser ?(empty_prefix=Prefix.unknown) ?(infixes=fun _ -> Infix.unknown) prefixes =
   Pratt {prefixes; empty_prefix; infixes}
 
-module Non_incremental = struct
-  let build_parse_tree ~lexer parser = parse parser ~lexer |> fst
+module Parse_tree = struct
+  type 'a t = E : ('tok, 'a) parse_node -> 'a t
 
-  let run parser ~lexer = build_parse_tree parser ~lexer |> Node.value
+  let of_parse_node node = E node
+
+  let to_ast (E node) = Node.value node
+
+  let length (E node) = Node.length node
+end
+
+module Non_incremental = struct
+  let build_parse_node parser ~lexer = parse parser ~lexer |> fst
+
+  let run parser ~lexer = build_parse_node parser ~lexer |> Parse_tree.of_parse_node
 end
 
 module Incremental = struct
   type ('tok, 'a) t = {
     parser : ('tok, 'a) parser;
-    parse_tree : ('tok, 'a) parse_node;
+    parse_node : ('tok, 'a) parse_node;
   }
 
   type change_loc = {
@@ -256,8 +266,10 @@ module Incremental = struct
   }
 
   let make ~lexer parser =
-    let parse_tree = Non_incremental.build_parse_tree parser ~lexer in
-    Node.value parse_tree, {parser; parse_tree}
+    let parse_node = Non_incremental.build_parse_node parser ~lexer in
+    {parser; parse_node}
+
+  let parse_tree {parse_node; _} = Parse_tree.of_parse_node parse_node
 
   let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> pos:int ->
     parser:('tok, a) parser -> ('tok, a) parse_node -> ('tok, a) parse_node * 'tok Lexer.t =
@@ -358,8 +370,8 @@ module Incremental = struct
       let pratt_node, state = pratt_node |> incr_parse ~pos ~prec:max_int in
       pratt_node, state.lexer
 
-  let update ~start ~added ~removed ~lexer ({parser; parse_tree} as t) =
+  let update ~start ~added ~removed ~lexer ({parser; parse_node} as t) =
     let change = {start; added; removed} in
-    let parse_tree, _ = parse_tree |> update_parse change ~lexer ~pos:0 ~parser in
-    Node.value parse_tree, {t with parse_tree}
+    let parse_node, _ = parse_node |> update_parse change ~lexer ~pos:0 ~parser in
+    {t with parse_node}
 end
