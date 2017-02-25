@@ -4,16 +4,15 @@ val token : 'tok -> 'tok lex_result
 
 val error : ?token:'tok -> string -> 'tok lex_result
 
-type 'tok lexer = int -> 'tok lex_result * int
-
-val of_list : 'tok list -> 'tok lexer
-
 module Lexer : sig
   type 'tok t
 
-  val make : 'tok lexer -> 'tok t
+  val make : (int -> 'tok lex_result * int) -> 'tok t
 
-  val make_at : int -> 'tok lexer -> 'tok t
+  val of_token_list : 'tok list -> 'tok t
+
+  val of_ocamllex : (Lexing.lexbuf -> 'tok lex_result) -> make_lexbuf_at:(int -> Lexing.lexbuf) ->
+    'tok t
 
   val pos : 'tok t -> int
 

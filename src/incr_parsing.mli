@@ -61,7 +61,7 @@ module Infix : sig
 end
 
 module Non_incremental : sig
-  val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.lexer -> 'a
+  val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> 'a
 end
 
 module Incremental : sig
@@ -69,6 +69,6 @@ module Incremental : sig
 
   val make : lexer:'tok Incr_lexing.lexer -> ('tok, 'a) parser -> 'a * ('tok, 'a) t
 
-  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.lexer ->
+  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.Lexer.t ->
     ('tok, 'a) t -> 'a * ('tok, 'a) t
 end

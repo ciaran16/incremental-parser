@@ -156,7 +156,7 @@ let parse_prefix ~prec ({lookups = {prefixes; empty_prefix; _}; lexer; _} as sta
 let pratt_parse state =
   state |> parse_prefix ~prec:max_int (* Begin parsing with the lowest precedence. *)
 
-let rec run : type tok a. lexer:tok Lexer.t -> (tok, a) parser ->
+let rec parse : type tok a. lexer:tok Lexer.t -> (tok, a) parser ->
   (tok, a) parse_node * tok Lexer.t = fun ~lexer parser ->
   let fail s = failwith @@ s ^ " failed at pos " ^ (string_of_int @@ Lexer.pos lexer) ^ "." in
   match parser with
@@ -167,16 +167,16 @@ let rec run : type tok a. lexer:tok Lexer.t -> (tok, a) parser ->
       | None -> fail "Satisfy"
     end
   | Fix f ->
-    run (f (Fix f)) ~lexer
+    parse (f (Fix f)) ~lexer
   | Pratt lookups ->
     let parse_tree, {lexer; _} = pratt_parse {lookups; lexer} in
     Node.pratt ~lookups parse_tree, lexer
   | Lift (f, p) ->
-    let node, lexer = run p ~lexer in
+    let node, lexer = parse p ~lexer in
     Node.lift ~f ~p node, lexer
   | App (p, q) ->
-    let left, lexer = run p ~lexer in
-    let right, lexer = run q ~lexer in
+    let left, lexer = parse p ~lexer in
+    let right, lexer = parse q ~lexer in
     Node.app ~p ~q left right, lexer
 
 module Combinators = struct
@@ -227,7 +227,7 @@ module Prefix = struct
     Prefix {prec; f; right}, state
 
   let custom parser = some @@ fun ({lexer; _} as state) ->
-    let parse_node, lexer = run parser ~lexer in
+    let parse_node, lexer = parse parser ~lexer in
     (* TODO need to carry across right nodes. *)
     Combinators {parser; parse_node}, {state with lexer}
 
@@ -238,9 +238,7 @@ let pratt_parser ?(empty_prefix=Prefix.unknown) ?(infixes=fun _ -> Infix.unknown
   Pratt {prefixes; empty_prefix; infixes}
 
 module Non_incremental = struct
-  let build_parse_tree ~lexer parser =
-    let lexer = Lexer.make lexer in
-    run parser ~lexer |> fst
+  let build_parse_tree ~lexer parser = parse parser ~lexer |> fst
 
   let run parser ~lexer = build_parse_tree parser ~lexer |> Node.value
 end
@@ -269,7 +267,7 @@ module Incremental = struct
         (* If the start position is just after the node then the node is just returned, which
            saves lexing and parsing a token. *)
         if start = pos + len then node, lexer
-        else run parser ~lexer:(Lexer.move_to pos lexer)
+        else parse parser ~lexer:(Lexer.move_to pos lexer)
       | Pratt_parse_node {lookups; pratt_node; _} ->
         let pratt_node, lexer = update_pratt change ~lexer ~pos ~lookups pratt_node in
         Node.pratt ~lookups pratt_node, lexer
@@ -362,7 +360,6 @@ module Incremental = struct
 
   let update ~start ~added ~removed ~lexer ({parser; parse_tree} as t) =
     let change = {start; added; removed} in
-    let lexer = Lexer.make lexer in
     let parse_tree, _ = parse_tree |> update_parse change ~lexer ~pos:0 ~parser in
     Node.value parse_tree, {t with parse_tree}
 end
