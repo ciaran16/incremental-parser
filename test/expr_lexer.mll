@@ -14,10 +14,8 @@ type token =
 }
 
 let digit = ['0'-'9']
-let frac = '.' digit+
-let exp = ['e' 'E'] ['+' '-'] digit+
-let number = '-'? ('0' | (['1'-'9'] digit*)) frac? exp?
-let not_num = (digit | ['.' 'e' 'E' '+' '-'])+
+let ident_first = ['a'-'z' 'A'-'Z' '_']
+let identifier = ident_first (ident_first | digit)*
 
 rule lex = parse
   | ' ' | '\t' | '\n' | '\r' { lex lexbuf }
@@ -40,6 +38,6 @@ rule lex = parse
   | "else" { token ELSE }
   | "let" { token LET }
   | "in" { token IN }
+  | identifier as s { token (IDENT s) }
   | eof { token END }
-  | (['a'-'z' 'A'-'Z' '_'] | digit)+ as s { error ("Unknown identifier '" ^ s ^ "'.") }
   | _ { error ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }
