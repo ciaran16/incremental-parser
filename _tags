@@ -1,1 +1,6 @@
-true : warn(+a-4-42-48), safe_string
+true : warn(+a-4-42-48), bin_annot, safe_string
+
+<src> : include
+
+<test> : include
+<test/*> : package(alcotest)

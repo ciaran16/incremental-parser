@@ -1,3 +1,7 @@
-S .
-B _build
 FLG -w +a-4-34-37-42-48
+
+S src
+
+B _build/**
+
+PKG alcotest
