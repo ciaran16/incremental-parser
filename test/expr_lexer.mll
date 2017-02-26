@@ -6,7 +6,7 @@ type token =
   | INT of int
   | PLUS | MINUS | TIMES | DIVIDE | POW | FACT
   | BOOL of bool
-  | EQUAL | AND | OR
+  | EQUALS | AND | OR
   | PAREN_L | PAREN_R
   | IF | THEN | ELSE
   | LET | IN
@@ -28,7 +28,7 @@ rule lex = parse
   | '!' { token FACT }
   | "true" { token (BOOL true) }
   | "false" { token (BOOL false) }
-  | '=' { token EQUAL }
+  | '=' { token EQUALS }
   | "&&" { token AND }
   | "||" { token OR }
   | '(' { token PAREN_L }

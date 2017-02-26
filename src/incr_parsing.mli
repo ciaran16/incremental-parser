@@ -1,84 +1,76 @@
-module Tags : sig
-  type (_, _) eq =
-    | Equal : ('a, 'a) eq
-    | Not_equal : ('a, 'b) eq
+module Make (Tag : Tagging.Tag) : sig
+  type ('tok, 'a) parser
 
-  module Lift (T : sig type 'a t end) : sig
-    val f : ('a, 'b) eq -> ('a T.t, 'b T.t) eq
+  type ('tok, 'a) prefix
+
+  type ('tok, 'a) infix
+
+  val pratt_parser : ?infixes:('tok -> ('tok, 'a) infix) -> ?prefixes:('tok -> ('tok, 'a) prefix) ->
+    ?empty_prefix:('tok, 'a) prefix -> 'a Tag.t -> ('tok, 'a) parser
+
+  module Combinators : sig
+    val eat : 'tok -> ('tok, 'tok) parser
+
+    val satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
+
+    val (<*>) : ('tok, 'a -> 'b) parser -> ('tok, 'a) parser -> ('tok, 'b) parser
+
+    val (<$>) : ('a -> 'b) -> ('tok, 'a) parser -> ('tok, 'b) parser
+
+    val ( *>) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'b) parser
+
+    val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
+
+    val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
   end
-end
 
-type ('tok, 'a) parser
+  (** A higher precedence is given by a lower number.
+      A precendece of 1 is higher than a precedence of 2. *)
 
-type ('tok, 'a) prefix
+  module Prefix : sig
+    val return : 'a -> ('tok, 'a) prefix
 
-type ('tok, 'a) infix
+    val unary : ?prec:int -> ('a -> 'a) -> ('tok, 'a) prefix
+    (** The default precedence is -1 (a very high precedence), as prefix operators normally have
+        higher precedence than infix operators. *)
 
-val pratt_parser : ?empty_prefix:('tok, 'a) prefix -> ?infixes:('tok -> ('tok, 'a) infix) ->
-  ('tok -> ('tok, 'a) prefix) -> ('tok, 'a) parser
+    val custom : ('tok, 'a) parser -> ('tok, 'a) prefix
 
-module Combinators : sig
-  val eat : 'tok -> ('tok, 'tok) parser
+    val unknown : ('tok, 'a) prefix
+  end
 
-  val satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
+  module Infix : sig
+    val left : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
 
-  val (<*>) : ('tok, 'a -> 'b) parser -> ('tok, 'a) parser -> ('tok, 'b) parser
+    val right : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
 
-  val (<$>) : ('a -> 'b) -> ('tok, 'a) parser -> ('tok, 'b) parser
+    val postfix : ?prec:int -> ('a -> 'a) -> ('tok, 'a) infix
+    (** The default precedence is -2 (a very high precedence), as postfix operators normally have
+        higher precedence than prefix and infix operators. *)
 
-  val ( *>) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'b) parser
+    val unknown : ('tok, 'a) infix
+  end
 
-  val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
+  module Parse_tree : sig
+    type 'a t
 
-  val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
-end
+    val to_ast : 'a t -> 'a
 
-(** A higher precedence is given by a lower number.
-    A precendece of 1 is higher than a precedence of 2. *)
+    val length : 'a t -> int
+  end
 
-module Prefix : sig
-  val return : 'a -> ('tok, 'a) prefix
+  module Non_incremental : sig
+    val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> 'a Parse_tree.t
+  end
 
-  val unary : ?prec:int -> ('a -> 'a) -> ('tok, 'a) prefix
-  (** The default precedence is -1 (a very high precedence), as prefix operators normally have
-      higher precedence than infix operators. *)
+  module Incremental : sig
+    type ('tok, 'a) t
 
-  val custom : ('tok, 'a) parser -> ('tok, 'a) prefix
+    val make : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> ('tok, 'a) t
 
-  val unknown : ('tok, 'a) prefix
-end
+    val parse_tree : ('tok, 'a) t -> 'a Parse_tree.t
 
-module Infix : sig
-  val left : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
-
-  val right : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
-
-  val postfix : ?prec:int -> ('a -> 'a) -> ('tok, 'a) infix
-  (** The default precedence is -2 (a very high precedence), as postfix operators normally have
-      higher precedence than prefix and infix operators. *)
-
-  val unknown : ('tok, 'a) infix
-end
-
-module Parse_tree : sig
-  type 'a t
-
-  val to_ast : 'a t -> 'a
-
-  val length : 'a t -> int
-end
-
-module Non_incremental : sig
-  val run : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> 'a Parse_tree.t
-end
-
-module Incremental : sig
-  type ('tok, 'a) t
-
-  val make : lexer:'tok Incr_lexing.Lexer.t -> ('tok, 'a) parser -> ('tok, 'a) t
-
-  val parse_tree : ('tok, 'a) t -> 'a Parse_tree.t
-
-  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.Lexer.t ->
-    ('tok, 'a) t -> ('tok, 'a) t
+    val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.Lexer.t ->
+      ('tok, 'a) t -> ('tok, 'a) t
+  end
 end
