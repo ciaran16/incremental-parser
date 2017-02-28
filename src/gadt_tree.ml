@@ -68,7 +68,7 @@ module Make (C : Container) = struct
   include struct [@@@warning "-37"]
     type z
 
-    type 'n s = S
+    type 'n s = S (* As S isn't used it causes warning 37. *)
   end
 
   type ('a, _) node =
@@ -90,8 +90,6 @@ module Make (C : Container) = struct
     else C.max_leaf_size
 
   let min_leaf_size = (max_leaf_size + 1) / 2
-
-  let (^^) = C.append
 
   let split_container c i = C.sub c 0 i, C.sub c i (C.length c - i)
 
@@ -161,12 +159,12 @@ module Make (C : Container) = struct
   let append_leaf_and_short c1 c2 =
     let l1 = C.length c1 in let l2 = C.length c2 in let len = l1 + l2 in
     if l1 = 0 then Done (leaf c2) else if l2 = 0 then Done (leaf c1)
-    else if len <= max_leaf_size then Done (leaf (c1 ^^ c2))
+    else if len <= max_leaf_size then Done (leaf (C.append c1 c2))
     else
       let m = len / 2 in
       let c1, c2 =
-        if l1 < m then let c2', c2'' = split_container c2 (m - l1) in c1 ^^ c2', c2''
-        else if l1 > m then let c1', c1'' = split_container c1 m in c1', c1'' ^^ c2
+        if l1 < m then let c2', c2'' = split_container c2 (m - l1) in C.append c1 c2', c2''
+        else if l1 > m then let c1', c1'' = split_container c1 m in c1', C.append c1'' c2
         else c1, c2
       in Up (leaf c1, leaf c2)
 
@@ -247,7 +245,7 @@ module Make (C : Container) = struct
     in
     match l, r with
     | Empty, t | t, Empty -> t
-    | Flat c1, Flat c2 -> leaf_flat_empty (c1 ^^ c2)
+    | Flat c1, Flat c2 -> leaf_flat_empty (C.append c1 c2)
     | Flat c, Node node -> balance_left (Short c) (down node) |> append_balanced_pair
     | Node node, Flat c -> balance_right (down node) (Short c) |> append_balanced_pair
     | Node l, Node r -> make_balanced_pair (down l) (down r) |> append_balanced_pair
@@ -367,7 +365,7 @@ module Make (C : Container) = struct
       | [c] when C.length c < min_leaf_size -> List.rev acc, Some (Flat c)
       | c::c'::cs when C.length c < min_leaf_size ->
         (* TODO  *)
-        make_leaves ((c ^^ c')::cs) acc
+        make_leaves ((C.append c c')::cs) acc
       | c::cs when C.length c <= max_leaf_size -> make_leaves cs (leaf c :: acc)
       | c::cs -> make_leaves cs @@ List.rev_append (list_leaves c) acc
     in
@@ -404,7 +402,7 @@ module Make (C : Container) = struct
 
   let rec repeat_to len = function
     | Empty -> invalid_arg "repeat_to - trying to repeat the empty tree."
-    | Flat c -> leaf_flat_empty (c ^^ c) |> repeat_to len
+    | Flat c -> leaf_flat_empty (C.append c c) |> repeat_to len
     | Node node as t ->
       match t |> sub 0 len with
       | None -> Node (two node node) |> repeat_to len
@@ -594,18 +592,18 @@ module Append_tree (T : S) = struct
 
   let of_tree m = {empty with m}
 
-  let to_tree {ls; m; rs; _} = T.append ~l:(T.concat ls) ~r:(T.concat (m::List.rev rs))
+  let underlying_tree {ls; m; rs; _} = T.append ~l:(T.concat ls) ~r:(T.concat (m::List.rev rs))
 
   let length {m; len_ls; len_rs; _} = len_ls + T.length m + len_rs
 
-  let get i t = t |> to_tree |> T.get i
+  let get i t = t |> underlying_tree |> T.get i
 
-  let get_exn i t = t |> to_tree |> T.get_exn i
+  let get_exn i t = t |> underlying_tree |> T.get_exn i
 
   let max_length = 1000
 
   let append ~l ~r =
-    let full_append () = T.append ~l:(to_tree l) ~r:(to_tree r) |> of_tree in
+    let full_append () = T.append ~l:(underlying_tree l) ~r:(underlying_tree r) |> of_tree in
     if l.len_rs = max_length || r.len_ls = max_length then full_append ()
     else
       (* TODO need to just cons on to list if it's short. *)
@@ -617,22 +615,22 @@ module Append_tree (T : S) = struct
       | r::ts -> concat (append ~l ~r) ts
     in concat empty ts
 
-  let split i t = match t |> to_tree |> T.split i with
+  let split i t = match t |> underlying_tree |> T.split i with
     | None -> None
     | Some (l, r) -> Some (of_tree l, of_tree r)
 
-  let split_exn i t = let l, r = t |> to_tree |> T.split_exn i in of_tree l, of_tree r
+  let split_exn i t = let l, r = t |> underlying_tree |> T.split_exn i in of_tree l, of_tree r
 
-  let sub i j t = match t |> to_tree |> T.sub i j with
+  let sub i j t = match t |> underlying_tree |> T.sub i j with
     | None -> None
     | Some t -> Some (of_tree t)
 
-  let sub_exn i j t = t |> to_tree |> T.sub_exn i j |> of_tree
+  let sub_exn i j t = t |> underlying_tree |> T.sub_exn i j |> of_tree
 
   module Iterator = struct
     include T.Iterator
 
-    let start_at i t = t |> to_tree |> T.Iterator.start_at i
+    let start_at i t = t |> underlying_tree |> T.Iterator.start_at i
   end
 end
 

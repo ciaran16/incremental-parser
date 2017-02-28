@@ -130,7 +130,7 @@ module Append_tree (Tree : S) : sig
 
   val of_tree : 'a Tree.t -> 'a t
 
-  val to_tree : 'a t -> 'a Tree.t
+  val underlying_tree : 'a t -> 'a Tree.t
 end
 
 module Zipped_trees (L : S) (R : S) : sig
