@@ -1,4 +1,4 @@
-open Expr_parser.Incr_parsing
+open Incr_parsing
 
 let expr_lexer_from_string s =
   let make_lexbuf_at pos = Lexing.from_string (String.sub s pos (String.length s - pos)) in

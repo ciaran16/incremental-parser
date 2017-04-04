@@ -1,4 +1,6 @@
 open Expr_lexer
+open Incr_parsing
+open Combinators
 
 type expr =
   | Int_lit of int
@@ -17,23 +19,9 @@ type expr =
   | Let of string * expr * expr
   | Var of string
 
-module Tag = struct
-  open Tagging
+let expr_tag : expr Tag.t = Tag.fresh ()
 
-  type _ t =
-    | Expr : expr t
-    | Expr_option : expr option t
-
-  let tags_equal : type a b. a t -> b t -> (a, b) equal = fun a_tag b_tag ->
-    match a_tag, b_tag with
-    | Expr, Expr -> Equal
-    | Expr_option, Expr_option -> Equal
-    | _ -> Not_equal
-end
-
-module Incr_parsing = Incr_parsing.Make (Tag)
-open Incr_parsing
-open Combinators
+let expr_option_tag : expr option Tag.t = Tag.fresh ()
 
 let expr = fix @@ fun expr ->
   let if_ e1 e2 e_o = If (e1, e2, e_o) in
@@ -44,7 +32,7 @@ let expr = fix @@ fun expr ->
       | ELSE ->  Prefix.custom ((fun e -> Some e) <$> expr)
       | _ ->     Prefix.unknown
     in
-    pratt_parser Tag.Expr_option ~prefixes ~empty_prefix:(Prefix.return None)
+    pratt_parser expr_option_tag ~prefixes ~empty_prefix:(Prefix.return None)
   in
   let prefixes = function
     | INT n ->   Prefix.return (Int_lit n)
@@ -69,4 +57,4 @@ let expr = fix @@ fun expr ->
     | OR ->      Infix.right 6 (fun e1 e2 -> Or (e1, e2))
     | _ ->       Infix.unknown
   in
-  pratt_parser Tag.Expr ~prefixes ~infixes
+  pratt_parser expr_tag ~prefixes ~infixes
