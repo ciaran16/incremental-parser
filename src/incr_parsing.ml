@@ -78,6 +78,15 @@ module Make (Tag : Tagging.Tag) = struct
         parse_node : ('tok, 'a) parse_node;
       }
 
+  and 'tok fragment =
+    | Full : ('tok, 'a) pratt_node -> 'tok fragment
+    | Partial : ('tok, 'a) pratt_node -> 'tok fragment
+
+  and 'tok fragments_stack = {
+    fragments : 'tok fragment list;
+    right_pos : int;
+  }
+
   and ('tok, 'a) lookups = {
     prefixes : ('tok -> ('tok, 'a) prefix);
     empty_prefix : ('tok, 'a) prefix;
@@ -85,17 +94,10 @@ module Make (Tag : Tagging.Tag) = struct
     tag : 'a Tag.t;
   }
 
-  and 'tok reusable_nodes = {
-    nodes : 'tok dyn_pratt_node list;
-    right_pos : int;
-  }
-
-  and 'tok dyn_pratt_node = Dyn : ('tok, 'a) pratt_node * 'a Tag.t -> 'tok dyn_pratt_node
-
   and ('tok, 'a) state = {
     lookups : ('tok, 'a) lookups;
     lexer : 'tok Lexer.t;
-    reuse : 'tok reusable_nodes;
+    reuse : 'tok fragments_stack;
   }
 
   and ('tok, 'a) state_f = ('tok, 'a) state -> ('tok, 'a) pratt_info * ('tok, 'a) state
@@ -152,11 +154,36 @@ module Make (Tag : Tagging.Tag) = struct
       {info; token_length; total_length = token_length + sub_length; type_tag = tag}
   end
 
-  (* Note that all nodes in this module are pratt nodes - only pratt nodes are reused. *)
-  module Reusable_nodes = struct
-    let empty = {nodes = []; right_pos = 0}
+  module Fragments_stack = struct
+    let empty end_pos = {fragments = []; right_pos = end_pos}
 
-    let push node ~pos {nodes; _} = {nodes = node::nodes; right_pos = pos}
+    let push_internal fragment ~pos fragments =
+      {fragments = fragment::fragments; right_pos = pos}
+
+    let push_full node ~pos {fragments; right_pos} =
+      assert (pos = right_pos - node.total_length);
+      fragments |> push_internal (Full node) ~pos
+
+    let push_partial node ~pos {fragments; right_pos} =
+      begin match node.info with
+        | Postfix _ -> assert (pos = right_pos - node.token_length)
+        | Infix {right; _} -> assert (pos = right_pos - right.total_length - node.token_length)
+        | _ -> assert false
+      end;
+      fragments |> push_internal (Partial node) ~pos
+
+    (*let check_for_node ({iter; right_nodes; right_pos; _} as state) =
+      let length_right = function
+        | Leaf _ | Prefix _ | Combinators _ as node -> length_pratt node
+        | Infix {right; _} -> length_pratt right + 1
+        | Postfix _ -> 1
+      in
+      let pos = Iter_wrapper.pos iter in
+      match right_nodes with
+      | node::right_nodes when pos = right_pos ->
+        let iter = iter |> Iter_wrapper.skip (length_right node) in
+        Some (node, {state with iter; right_nodes; right_pos=pos})
+      | _ -> None*)
   end
 
   let rec parse_infix ~prec left ({lookups = {infixes; tag; _}; lexer; _} as state) =
@@ -191,8 +218,8 @@ module Make (Tag : Tagging.Tag) = struct
   let pratt_parse state =
     state |> parse_prefix ~prec:max_int (* Begin parsing with the lowest precedence. *)
 
-  let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok reusable_nodes ->
-    (tok, a) parser -> (tok, a) parse_node * tok Lexer.t * tok reusable_nodes =
+  let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok fragments_stack ->
+    (tok, a) parser -> (tok, a) parse_node * tok Lexer.t * tok fragments_stack =
     fun ~lexer ~reuse parser ->
       match parser with
       | Satisfy f ->
@@ -284,7 +311,7 @@ module Make (Tag : Tagging.Tag) = struct
 
   module Non_incremental = struct
     let build_parse_node parser ~lexer =
-      let parse_node, _, _ = parse parser ~lexer ~reuse:(Reusable_nodes.empty) in
+      let parse_node, _, _ = parse parser ~lexer ~reuse:(Fragments_stack.empty 0) in
       parse_node
 
     let run parser ~lexer = build_parse_node parser ~lexer |> Parse_tree.of_parse_node
@@ -308,9 +335,9 @@ module Make (Tag : Tagging.Tag) = struct
 
     let parse_tree {parse_node; _} = Parse_tree.of_parse_node parse_node
 
-    let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok reusable_nodes ->
+    let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok fragments_stack ->
       pos:int -> parser:('tok, a) parser -> ('tok, a) parse_node ->
-      ('tok, a) parse_node * 'tok Lexer.t * 'tok reusable_nodes =
+      ('tok, a) parse_node * 'tok Lexer.t * 'tok fragments_stack =
       fun ({start; added; removed} as change) ~lexer ~reuse ~pos ~parser -> function
         | Satisfy_node {len; _} as node ->
           assert (start >= pos && start <= pos + len);
@@ -355,11 +382,12 @@ module Make (Tag : Tagging.Tag) = struct
                 right |> update_parse new_change ~lexer ~reuse ~pos ~parser:q in
               Node.app ~p ~q left right, lexer, reuse
 
-    and update_pratt : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok reusable_nodes ->
+    and update_pratt : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok fragments_stack ->
       pos:int -> lookups:('tok, a) lookups -> ('tok, a) pratt_node ->
-      ('tok, a) pratt_node * 'tok Lexer.t * 'tok reusable_nodes =
+      ('tok, a) pratt_node * 'tok Lexer.t * 'tok fragments_stack =
       fun ({start; added; removed} as change) ~lexer ~reuse ~pos ~lookups pratt_node ->
         let {tag; _} = lookups in
+        let change_offset = added - removed in
         let rec incr_parse ~reuse ~prec ~pos:left_pos ({info; token_length; _} as node) =
           (* The position passed into this function (left_pos) is the position that the node starts
              at, so the position of the token that triggered this node will be equal to this
@@ -373,6 +401,8 @@ module Make (Tag : Tagging.Tag) = struct
           if start < token_start_pos then (* Update left. *)
             match info with
             | Infix {left; _} | Postfix {left; _} ->
+              let stack_pos = token_start_pos + change_offset in
+              let reuse = reuse |> Fragments_stack.push_partial node ~pos:stack_pos in
               left |> incr_parse ~reuse ~prec ~pos:left_pos
             | Leaf _ | Prefix _ | Combinators _ -> assert false
           else if start >= token_end_pos && start > token_start_pos then (* Update right. *)
@@ -398,12 +428,14 @@ module Make (Tag : Tagging.Tag) = struct
               let state = {lookups; lexer; reuse} in
               state |> parse_infix ~prec node
             | Combinators {parser; parse_node} ->
-              let pos = token_end_pos in
+              (* Start incrementally parsing after the token. *)
               let parse_node, lexer, reuse =
-                parse_node |> update_parse change ~lexer ~reuse ~pos ~parser in
+                parse_node |> update_parse change ~lexer ~reuse ~pos:token_end_pos ~parser in
               let node = Pratt.make_node (Combinators {parser; parse_node}) ~token_length ~tag in
-              node, {lookups; lexer; reuse}
-          else
+              (* Move the lexer to after the node and parse. *)
+              let lexer = lexer |> Lexer.move_to (token_start_pos + node.total_length) in
+              {lookups; lexer; reuse} |> parse_infix ~prec node
+          else (* Start parsing at this node's position. *)
             let lexer = lexer |> Lexer.move_to token_start_pos in
             let state = {lookups; lexer; reuse} in
             match info with
@@ -421,7 +453,8 @@ module Make (Tag : Tagging.Tag) = struct
       else if added = 0 && removed = 0 then t
       else
         let change = {start; added; removed} in
-        let reuse = Reusable_nodes.empty in
+        let right_pos = Node.length parse_node + added - removed in
+        let reuse = Fragments_stack.empty right_pos in
         let parse_node, _, _ = parse_node |> update_parse change ~lexer ~reuse ~pos:0 ~parser in
         {t with parse_node}
   end
