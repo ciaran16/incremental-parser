@@ -35,8 +35,8 @@ module Incremental_parsing = struct
   let update_token () =
     let lexer = expr_lexer_from_string "3 * 2 - -3" in
     let incr = Incremental.make Expr_parser.expr ~lexer in
-    let lexer = expr_lexer_from_string "3 * 42 - -3" in
-    let incr = incr |> Incremental.update ~start:4 ~added:1 ~removed:0 ~lexer in
+    let lexer = expr_lexer_from_string "3 * 24 - -3" in
+    let incr = incr |> Incremental.update ~start:5 ~added:1 ~removed:0 ~lexer in
     let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
     let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
     check_expr "parses equal" e1 e2
@@ -50,10 +50,20 @@ module Incremental_parsing = struct
     let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
     check_expr "parses equal" e1 e2
 
+  let update_end () =
+    let lexer = expr_lexer_from_string "if true then 2" in
+    let incr = Incremental.make Expr_parser.expr ~lexer in
+    let lexer = expr_lexer_from_string "if true then 2 + 2" in
+    let incr = incr |> Incremental.update ~start:14 ~added:4 ~removed:0 ~lexer in
+    let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
+    let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
+    check_expr "parses equal" e1 e2
+
   let tests = [
     "Incremental update", `Quick, update;
     "Token update", `Quick, update_token;
     "Update just before empty prefix operator", `Quick, update_empty;
+    "Update at end", `Quick, update_end;
   ]
 end
 

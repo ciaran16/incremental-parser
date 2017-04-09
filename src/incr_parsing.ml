@@ -397,17 +397,24 @@ module Incremental = struct
           | Infix {left; _} | Postfix {left; _} -> left_pos + left.total_length
         in
         let token_end_pos = token_start_pos + token_length in
-        if start < token_start_pos then (* Update left. *)
+        if start <= token_end_pos then (* Update left or current node. *)
+          (* We check if start = token_end_pos in case we are updating to the very right of the left
+             sub-tree. *)
           match info with
           | Infix {left; _} | Postfix {left; _} ->
-            let stack_pos = token_start_pos + change_offset in
-            let reuse = reuse |> Fragments_stack.push_partial node ~pos:stack_pos in
-            left |> incr_parse ~reuse ~prec ~pos:left_pos
-          | Leaf _ | Prefix _ | Combinators _ -> assert false
-        else if start >= token_end_pos && start > token_start_pos then (* Update right. *)
-          (* The check for start > token_start_pos handles the empty prefix, so token_length = 0.
-             This should not update right but instead re-parse from before the empty prefix in
-             case the modification means it is no longer taken. *)
+            if start <= token_start_pos then (* Update left. *)
+              let stack_pos = token_start_pos + change_offset in
+              let reuse = reuse |> Fragments_stack.push_partial node ~pos:stack_pos in
+              left |> incr_parse ~reuse ~prec ~pos:left_pos
+            else (* Update the current node. *)
+              let lexer = lexer |> Lexer.move_to token_start_pos in
+              let state = {lookups; lexer; reuse} in
+              state |> parse_infix ~prec left
+          | Leaf _ | Prefix _ | Combinators _ -> (* Update the current node. *)
+            let lexer = lexer |> Lexer.move_to token_start_pos in
+            let state = {lookups; lexer; reuse} in
+            state |> parse_prefix ~prec
+        else (* Update right. *)
           let go_right ~prec:prec' make_info right =
             (* Update right using the precedence of the current node (prec'). *)
             let right, state = right |> incr_parse ~reuse ~prec:prec' ~pos:token_end_pos in
@@ -420,12 +427,6 @@ module Incremental = struct
             right |> go_right ~prec (Pratt.prefix ~prec ~f)
           | Infix {prec; f; left; right; _} ->
             right |> go_right ~prec (Pratt.infix ~prec ~f ~left)
-          | Leaf _ | Postfix _ ->
-            (* Needing to update to the right of a leaf or postfix node means the start position
-               is at the very right of the tree, so start parsing at the end of the token. *)
-            let lexer = lexer |> Lexer.move_to token_end_pos in
-            let state = {lookups; lexer; reuse} in
-            state |> parse_infix ~prec node
           | Combinators {parser; parse_node} ->
             (* Start incrementally parsing after the token. *)
             let parse_node, lexer, reuse =
@@ -434,14 +435,7 @@ module Incremental = struct
             (* Move the lexer to after the node and parse. *)
             let lexer = lexer |> Lexer.move_to (token_start_pos + node.total_length) in
             {lookups; lexer; reuse} |> parse_infix ~prec node
-        else (* Start parsing at this node's position. *)
-          let lexer = lexer |> Lexer.move_to token_start_pos in
-          let state = {lookups; lexer; reuse} in
-          match info with
-          | Leaf _ | Prefix _ | Combinators _ -> (* Token corresponded to a prefix operator. *)
-            state |> parse_prefix ~prec
-          | Infix {left; _} | Postfix {left; _} -> (* Token corresponded to an infix operator. *)
-            state |> parse_infix ~prec left
+          | Leaf _ | Postfix _ -> invalid_arg "Update start position is out of bounds."
       in
       let node, {lexer; reuse; _} = pratt_node |> incr_parse ~prec:max_int ~reuse ~pos in
       node, lexer, reuse
