@@ -15,7 +15,7 @@ type ('tok, _) parser =
   | Pratt : ('tok, 'a) lookups -> ('tok, 'a) parser
   | Lift : ('a -> 'b) * ('tok, 'a) parser -> ('tok, 'b) parser
   | App : ('tok, 'a -> 'b) parser * ('tok, 'a) parser -> ('tok, 'b) parser
-  | Fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
+  | Fix : ('tok, 'a) parser Lazy.t -> ('tok, 'a) parser
 
 and ('tok, _) parse_node =
   | Satisfy_node : {
@@ -227,8 +227,8 @@ let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok fragments_stack ->
         | Some v -> Node.satisfy v ~len, lexer, reuse
         | None -> failwith ("Satisfy failed at pos " ^ string_of_int (Lexer.pos lexer) ^ ".")
       end
-    | Fix f ->
-      parse (f (Fix f)) ~lexer ~reuse
+    | Fix (lazy p) ->
+      parse p ~lexer ~reuse
     | Pratt lookups ->
       let parse_tree, {lexer; _} = pratt_parse {lookups; lexer; reuse} in
       Node.pratt ~lookups parse_tree, lexer, reuse
@@ -245,7 +245,7 @@ module Combinators = struct
 
   let satisfy f = Satisfy f
 
-  let fix f = Fix f
+  let fix f = let rec p = lazy (f (Fix p)) in Lazy.force p
 
   let (<$>) f p = Lift (f, p)
 
@@ -295,8 +295,8 @@ module Prefix = struct
 end
 
 let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.unknown)
-    ?(infixes = fun _ -> Infix.unknown) tag =
-  Pratt {prefixes; empty_prefix; infixes; tag}
+    ?(infixes = fun _ -> Infix.unknown) () =
+  Pratt {prefixes; empty_prefix; infixes; tag = Tag.fresh ()}
 
 module Parse_tree = struct
   type 'a t = E : ('tok, 'a) parse_node -> 'a t
@@ -385,9 +385,7 @@ module Incremental = struct
     pos:int -> lookups:('tok, a) lookups -> ('tok, a) pratt_node ->
     ('tok, a) pratt_node * 'tok Lexer.t * 'tok fragments_stack =
     fun ({start; added; removed} as change) ~lexer ~reuse ~pos ~lookups pratt_node ->
-      let {tag; _} = lookups in
-      let change_offset = added - removed in
-      let rec incr_parse ~reuse ~prec ~pos:left_pos ({info; token_length; _} as node) =
+      let rec incr_parse ~reuse ~prec ~pos:left_pos {info; token_length; _} =
         (* The position passed into this function (left_pos) is the position that the node starts
            at, so the position of the token that triggered this node will be equal to this
            position plus the total length of the left sub-node (if there is one). For leaf, prefix
@@ -403,18 +401,15 @@ module Incremental = struct
           match info with
           | Infix {left; _} | Postfix {left; _} ->
             if start <= token_start_pos then (* Update left. *)
-              let stack_pos = token_start_pos + change_offset in
-              let reuse = reuse |> Fragments_stack.push_partial node ~pos:stack_pos in
               left |> incr_parse ~reuse ~prec ~pos:left_pos
             else (* Update the current node. *)
               let lexer = lexer |> Lexer.move_to token_start_pos in
-              let state = {lookups; lexer; reuse} in
-              state |> parse_infix ~prec left
+              {lookups; lexer; reuse} |> parse_infix ~prec left
           | Leaf _ | Prefix _ | Combinators _ -> (* Update the current node. *)
             let lexer = lexer |> Lexer.move_to token_start_pos in
-            let state = {lookups; lexer; reuse} in
-            state |> parse_prefix ~prec
+            {lookups; lexer; reuse} |> parse_prefix ~prec
         else (* Update right. *)
+          let tag = lookups.tag in
           let go_right ~prec:prec' make_info right =
             (* Update right using the precedence of the current node (prec'). *)
             let right, state = right |> incr_parse ~reuse ~prec:prec' ~pos:token_end_pos in

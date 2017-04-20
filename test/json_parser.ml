@@ -11,8 +11,6 @@ type json =
   | Bool of bool
   | Null
 
-let json_tag : json Tag.t = Tag.fresh ()
-
 let value = fix @@ fun value ->
   let name = satisfy (function STRING s -> Some s | _ -> None) in
   let pair = (fun n v -> (n, v)) <$> name <*> eat COLON *> value in
@@ -25,4 +23,4 @@ let value = fix @@ fun value ->
     | NUMBER n ->    Prefix.return (Number n)
     | _ ->           Prefix.unknown
   in
-  pratt_parser json_tag ~prefixes
+  pratt_parser ~prefixes ()

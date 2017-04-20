@@ -19,10 +19,6 @@ type expr =
   | Let of string * expr * expr
   | Var of string
 
-let expr_tag : expr Tag.t = Tag.fresh ()
-
-let expr_option_tag : expr option Tag.t = Tag.fresh ()
-
 let expr = fix @@ fun expr ->
   let if_ e1 e2 e_o = If (e1, e2, e_o) in
   let let_ x e1 e2 = Let (x, e1, e2) in
@@ -32,7 +28,7 @@ let expr = fix @@ fun expr ->
       | ELSE ->  Prefix.custom ((fun e -> Some e) <$> expr)
       | _ ->     Prefix.unknown
     in
-    pratt_parser expr_option_tag ~prefixes ~empty_prefix:(Prefix.return None)
+    pratt_parser ~prefixes ~empty_prefix:(Prefix.return None) ()
   in
   let prefixes = function
     | INT n ->   Prefix.return (Int_lit n)
@@ -57,4 +53,4 @@ let expr = fix @@ fun expr ->
     | OR ->      Infix.right 6 (fun e1 e2 -> Or (e1, e2))
     | _ ->       Infix.unknown
   in
-  pratt_parser expr_tag ~prefixes ~infixes
+  pratt_parser ~prefixes ~infixes ()
