@@ -1,15 +1,5 @@
 module Lexer = Incr_lexing.Lexer
 
-(*module Bal_tree = struct
-  module Zipped = Zipped_trees (F_array) (F_array)
-
-  include Append_tree (Zipped)
-
-  let parse_tree t = t |> underlying_tree |> Zipped.left
-
-  let ast t = t |> underlying_tree |> Zipped.right
-end*)
-
 type ('tok, _) parser =
   | Satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
   | Pratt : ('tok, 'a) lookups -> ('tok, 'a) parser
@@ -77,14 +67,7 @@ and ('tok, 'a) pratt_info =
       parse_node : ('tok, 'a) parse_node;
     }
 
-and 'tok fragment =
-  | Full : ('tok, 'a) pratt_node -> 'tok fragment
-  | Partial : ('tok, 'a) pratt_node -> 'tok fragment
-
-and 'tok fragments_stack = {
-  fragments : 'tok fragment list;
-  right_pos : int;
-}
+and 'tok dyn_fragment = Dyn : ('tok, 'a) pratt_node * int -> 'tok dyn_fragment
 
 and ('tok, 'a) lookups = {
   prefixes : ('tok -> ('tok, 'a) prefix);
@@ -96,7 +79,7 @@ and ('tok, 'a) lookups = {
 and ('tok, 'a) state = {
   lookups : ('tok, 'a) lookups;
   lexer : 'tok Lexer.t;
-  reuse : 'tok fragments_stack;
+  reuse : 'tok dyn_fragment list;
 }
 
 and ('tok, 'a) state_f = ('tok, 'a) state -> ('tok, 'a) pratt_info * ('tok, 'a) state
@@ -153,50 +136,103 @@ module Pratt = struct
     {info; token_length; total_length = token_length + sub_length; type_tag = tag}
 end
 
-module Fragments_stack = struct
-  let empty end_pos = {fragments = []; right_pos = end_pos}
+module Reuse = struct
+  type 'tok t = 'tok dyn_fragment list
+    (* A list of dynamic pratt nodes where the head node is the leftmost node and the following
+       nodes are (grand)parent nodes or nodes further right in the tree. *)
 
-  let push_internal fragment ~pos fragments =
-    {fragments = fragment::fragments; right_pos = pos}
+  let empty = []
 
-  let push_full node ~pos {fragments; right_pos} =
-    assert (pos = right_pos - node.total_length);
-    fragments |> push_internal (Full node) ~pos
-
-  let push_partial node ~pos {fragments; right_pos} =
-    begin match node.info with
-      | Postfix _ -> assert (pos = right_pos - node.token_length)
-      | Infix {right; _} -> assert (pos = right_pos - right.total_length - node.token_length)
-      | _ -> assert false
-    end;
-    fragments |> push_internal (Partial node) ~pos
-
-  (*let check_for_node ({iter; right_nodes; right_pos; _} as state) =
-    let length_right = function
-      | Leaf _ | Prefix _ | Combinators _ as node -> length_pratt node
-      | Infix {right; _} -> length_pratt right + 1
-      | Postfix _ -> 1
+  let extract_pratt ~left_pos parse_node =
+    let rec extract : type a. 'tok t -> left_pos:int -> ('tok, a) parse_node
+      -> 'tok t = fun t ~left_pos -> function
+      | Satisfy_node _ -> t
+      | Lift_node {node; _} -> node |> extract t ~left_pos
+      | Pratt_parse_node {pratt_node; _} -> Dyn (pratt_node, left_pos) :: t
+      | App_node {left; right; _} ->
+        let t = right |> extract t ~left_pos:(left_pos + Node.length left) in
+        left |> extract t ~left_pos
     in
-    let pos = Iter_wrapper.pos iter in
-    match right_nodes with
-    | node::right_nodes when pos = right_pos ->
-      let iter = iter |> Iter_wrapper.skip (length_right node) in
-      Some (node, {state with iter; right_nodes; right_pos=pos})
-    | _ -> None*)
+    parse_node |> extract [] ~left_pos
+
+  let rec seek_right seek_pos = function
+    | [] -> None, []
+    | Dyn (node, left_pos)::tl as t ->
+      if seek_pos < left_pos then None, t
+      else if seek_pos < left_pos + node.total_length then node |> down tl ~left_pos ~seek_pos
+      else tl |> seek_right seek_pos
+
+  and down : type a. 'tok t -> left_pos:int -> seek_pos:int -> ('tok, a) pratt_node
+    -> 'tok dyn_fragment option * 'tok t = fun t ~left_pos ~seek_pos ({info; _} as node) ->
+    let token_start_pos = match info with
+      | Leaf _ | Prefix _ | Combinators _ -> left_pos
+      | Infix {left; _} | Postfix {left; _} -> left_pos + left.total_length
+    in
+    if token_start_pos = seek_pos then Some (Dyn (node, left_pos)), t
+    else if seek_pos < token_start_pos then match info with (* Left. *)
+      | Leaf _ | Prefix _ | Combinators _ -> assert false
+      | Infix {left; _} | Postfix {left; _} ->
+        left |> down (Dyn (node, left_pos) :: t) ~left_pos ~seek_pos
+    else (* seek_pos > token_start_pos. *)
+      let token_end_pos = token_start_pos + node.token_length in
+      if seek_pos < token_end_pos then None, t
+      else match info with (* Right. *)
+        | Leaf _ | Postfix _ -> assert false
+        | Prefix {right; _} | Infix {right; _} ->
+          right |> down t ~left_pos:token_end_pos ~seek_pos
+        | Combinators {parse_node; _} ->
+          let o, t' = parse_node |> extract_pratt ~left_pos:token_end_pos |> seek_right seek_pos in
+          o, t' @ t
+
+  let create parse_tree ~start ~added ~removed =
+    (* We move the original parse tree to the positions of the new parse tree by starting with an
+       offset. Then we move past all the nodes to the left of the change so only nodes to the right
+       of the change can be reused. *)
+    let t = parse_tree |> extract_pratt ~left_pos:(added - removed) in
+    match t |> seek_right (start + added) with
+    | None, t -> t
+    | Some hd, tl -> hd::tl
+
+  let infix_at (type a) seek_pos ~prec:parse_prec (left : ('tok, a) pratt_node) t :
+    ('tok, a) pratt_node option * 'tok t =
+    match t |> seek_right seek_pos with
+    | None, t -> None, t
+    | Some (Dyn (node, _) as dyn_node), t ->
+      begin match Tag.compare left.type_tag node.type_tag with
+        | Tag.Not_equal -> None, dyn_node::t
+        | Tag.Equal ->
+          let return_info info =
+            Printf.printf "Reused infix at position %i.\n" seek_pos;
+            Some (Pratt.make_node info ~token_length:node.token_length ~tag:node.type_tag), t
+          in
+          match node.info with
+          | Infix {prec; f; right; _} when prec < parse_prec ->
+            Pratt.infix ~prec ~f ~left ~right |> return_info
+          | Postfix {prec; f; _} when prec < parse_prec ->
+            Pratt.postfix ~prec ~f ~left |> return_info
+          | _ -> None, dyn_node::t
+      end
 end
 
-let rec parse_infix ~prec left ({lookups = {infixes; tag; _}; lexer; _} as state) =
-  let token, token_length, lexer = lexer |> Lexer.next in
-  let next_prec, infix = infixes token in
-  if next_prec >= prec then
-    (* The next operator has lower precedence so can't be parsed at this level of the parse tree.
-       It will be parsed higher up in the tree (unless it is Infix.unknown). *)
-    left, state
-  else
-    let state = {state with lexer} in (* Advance the state, moving past the token. *)
-    let node_info, state = infix left state in
-    let node = Pratt.make_node node_info ~token_length ~tag in
-    state |> parse_infix ~prec node
+(* NOTE: Currently the end token will always be explicitly read, which is annoying. *)
+
+let rec parse_infix ~prec left ({lookups; lexer; reuse} as state) =
+  match reuse |> Reuse.infix_at (Lexer.pos lexer) ~prec left with
+  | Some node, reuse ->
+    let lexer = lexer |> Lexer.skip (node.total_length - left.total_length) in
+    {state with lexer; reuse} |> parse_infix ~prec node
+  | None, reuse ->
+    let token, token_length, lexer = lexer |> Lexer.next in
+    let next_prec, infix = lookups.infixes token in
+    if next_prec >= prec then
+      (* The next operator has lower precedence so can't be parsed at this level of the parse tree.
+         It will be parsed higher up in the tree (unless it is Infix.unknown). *)
+      left, state
+    else
+      let state = {state with lexer; reuse} in (* Advance the state, moving past the token. *)
+      let node_info, state = infix left state in
+      let node = Pratt.make_node node_info ~token_length ~tag:lookups.tag in
+      state |> parse_infix ~prec node
 
 let parse_prefix ~prec ({lookups = {prefixes; empty_prefix; tag; _}; lexer; _} as state) =
   let token, token_length, lexer = lexer |> Lexer.next in
@@ -217,8 +253,8 @@ let parse_prefix ~prec ({lookups = {prefixes; empty_prefix; tag; _}; lexer; _} a
 let pratt_parse state =
   state |> parse_prefix ~prec:max_int (* Begin parsing with the lowest precedence. *)
 
-let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok fragments_stack ->
-  (tok, a) parser -> (tok, a) parse_node * tok Lexer.t * tok fragments_stack =
+let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok Reuse.t ->
+  (tok, a) parser -> (tok, a) parse_node * tok Lexer.t * tok Reuse.t =
   fun ~lexer ~reuse parser ->
     match parser with
     | Satisfy f ->
@@ -310,7 +346,7 @@ end
 
 module Non_incremental = struct
   let build_parse_node parser ~lexer =
-    let parse_node, _, _ = parse parser ~lexer ~reuse:(Fragments_stack.empty 0) in
+    let parse_node, _, _ = parse parser ~lexer ~reuse:Reuse.empty in
     parse_node
 
   let run parser ~lexer = build_parse_node parser ~lexer |> Parse_tree.of_parse_node
@@ -334,9 +370,9 @@ module Incremental = struct
 
   let parse_tree {parse_node; _} = Parse_tree.of_parse_node parse_node
 
-  let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok fragments_stack ->
+  let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok Reuse.t ->
     pos:int -> parser:('tok, a) parser -> ('tok, a) parse_node ->
-    ('tok, a) parse_node * 'tok Lexer.t * 'tok fragments_stack =
+    ('tok, a) parse_node * 'tok Lexer.t * 'tok Reuse.t =
     fun ({start; added; removed} as change) ~lexer ~reuse ~pos ~parser -> function
       | Satisfy_node {len; _} as node ->
         assert (start >= pos && start <= pos + len);
@@ -381,11 +417,11 @@ module Incremental = struct
               right |> update_parse new_change ~lexer ~reuse ~pos ~parser:q in
             Node.app ~p ~q left right, lexer, reuse
 
-  and update_pratt : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok fragments_stack ->
+  and update_pratt : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok Reuse.t ->
     pos:int -> lookups:('tok, a) lookups -> ('tok, a) pratt_node ->
-    ('tok, a) pratt_node * 'tok Lexer.t * 'tok fragments_stack =
-    fun ({start; added; removed} as change) ~lexer ~reuse ~pos ~lookups pratt_node ->
-      let rec incr_parse ~reuse ~prec ~pos:left_pos {info; token_length; _} =
+    ('tok, a) pratt_node * 'tok Lexer.t * 'tok Reuse.t =
+    fun ({start; _} as change) ~lexer ~reuse ~pos ~lookups pratt_node ->
+      let rec incr_parse ~prec ~pos:left_pos {info; token_length; _} =
         (* The position passed into this function (left_pos) is the position that the node starts
            at, so the position of the token that triggered this node will be equal to this
            position plus the total length of the left sub-node (if there is one). For leaf, prefix
@@ -401,7 +437,7 @@ module Incremental = struct
           match info with
           | Infix {left; _} | Postfix {left; _} ->
             if start <= token_start_pos then (* Update left. *)
-              left |> incr_parse ~reuse ~prec ~pos:left_pos
+              left |> incr_parse ~prec ~pos:left_pos
             else (* Update the current node. *)
               let lexer = lexer |> Lexer.move_to token_start_pos in
               {lookups; lexer; reuse} |> parse_infix ~prec left
@@ -412,7 +448,7 @@ module Incremental = struct
           let tag = lookups.tag in
           let go_right ~prec:prec' make_info right =
             (* Update right using the precedence of the current node (prec'). *)
-            let right, state = right |> incr_parse ~reuse ~prec:prec' ~pos:token_end_pos in
+            let right, state = right |> incr_parse ~prec:prec' ~pos:token_end_pos in
             let node = Pratt.make_node (make_info ~right) ~token_length ~tag in
             (* Start parsing using the precedence of the parent node (prec). *)
             state |> parse_infix ~prec node
@@ -432,7 +468,7 @@ module Incremental = struct
             {lookups; lexer; reuse} |> parse_infix ~prec node
           | Leaf _ | Postfix _ -> invalid_arg "Update start position is out of bounds."
       in
-      let node, {lexer; reuse; _} = pratt_node |> incr_parse ~prec:max_int ~reuse ~pos in
+      let node, {lexer; reuse; _} = pratt_node |> incr_parse ~prec:max_int ~pos in
       node, lexer, reuse
 
   let update ~start ~added ~removed ~lexer ({parser; parse_node} as t) =
@@ -441,8 +477,7 @@ module Incremental = struct
     else if added = 0 && removed = 0 then t
     else
       let change = {start; added; removed} in
-      let right_pos = Node.length parse_node + added - removed in
-      let reuse = Fragments_stack.empty right_pos in
+      let reuse = Reuse.create parse_node ~start ~added ~removed in
       let parse_node, _, _ = parse_node |> update_parse change ~lexer ~reuse ~pos:0 ~parser in
       {t with parse_node}
 end
