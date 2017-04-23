@@ -23,47 +23,45 @@ module Incremental_parsing = struct
 
   let check_expr = Alcotest.check expr_testable
 
-  let update () =
-    let lexer = expr_lexer_from_string "3 * (4 + 5 * 6!) - -3" in
-    let incr = Incremental.make Expr_parser.expr ~lexer in
-    let lexer = expr_lexer_from_string "3 * (4 * 2 - 5 * 6!) - -3" in
-    let incr = incr |> Incremental.update ~start:7 ~added:5 ~removed:1 ~lexer in
+  let compare first second ~start ~added ~removed =
+    let incr = Incremental.make Expr_parser.expr ~lexer:(expr_lexer_from_string first) in
+    let lexer = expr_lexer_from_string second in
+    let incr = incr |> Incremental.update ~start ~added ~removed ~lexer in
     let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
     let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
     check_expr "parses equal" e1 e2
 
-  let update_token () =
-    let lexer = expr_lexer_from_string "3 * 2 - -3" in
-    let incr = Incremental.make Expr_parser.expr ~lexer in
-    let lexer = expr_lexer_from_string "3 * 24 - -3" in
-    let incr = incr |> Incremental.update ~start:5 ~added:1 ~removed:0 ~lexer in
-    let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
-    let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
-    check_expr "parses equal" e1 e2
+  let update () = compare
+      "3 * (4 + 5 * 6!) - -3"
+      "3 * (4 * 2 - 5 * 6!) - -3"
+      ~start:7 ~added:5 ~removed:1
 
-  let update_empty () =
-    let lexer = expr_lexer_from_string "if true then 2 + 2" in
-    let incr = Incremental.make Expr_parser.expr ~lexer in
-    let lexer = expr_lexer_from_string "if true then 2 else 4 + 2" in
-    let incr = incr |> Incremental.update ~start:14 ~added:7 ~removed:0 ~lexer in
-    let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
-    let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
-    check_expr "parses equal" e1 e2
+  let update_token () = compare
+      "3 * 2 - -3"
+      "3 * 24 - -3"
+      ~start:5 ~added:1 ~removed:0
 
-  let update_end () =
-    let lexer = expr_lexer_from_string "if true then 2" in
-    let incr = Incremental.make Expr_parser.expr ~lexer in
-    let lexer = expr_lexer_from_string "if true then 2 + 2" in
-    let incr = incr |> Incremental.update ~start:14 ~added:4 ~removed:0 ~lexer in
-    let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
-    let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
-    check_expr "parses equal" e1 e2
+  let update_empty () = compare
+      "if true then 2 + 2"
+      "if true then 2 else 4 + 2"
+      ~start:14 ~added:7 ~removed:0
+
+  let update_end () = compare
+      "if true then 2"
+      "if true then 2 + 2"
+      ~start:14 ~added:4 ~removed:0
+
+  let update_nested () = compare
+      "(((1 + 2) * 3) + 4) * 5"
+      "(((-1 + 2) * 3) + 4) * 5"
+      ~start:3 ~added:1 ~removed:0
 
   let tests = [
     "Incremental update", `Quick, update;
     "Token update", `Quick, update_token;
     "Update just before empty prefix operator", `Quick, update_empty;
     "Update at end", `Quick, update_end;
+    "Update nested", `Quick, update_nested;
   ]
 end
 
