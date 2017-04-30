@@ -124,16 +124,15 @@ module Pratt = struct
 
   let postfix ~prec ~f ~left = Postfix {prec; f; left; value = f (value left)}
 
-  let make_node info ~token_length ~tag =
-    let l {total_length; _} = total_length in
-    let sub_length = match info with
+  let make_node info ~token_length ~tag:type_tag =
+    let total_length = token_length + match info with
       | Leaf _ -> 0
-      | Prefix {right; _} -> l right
-      | Infix {left; right; _} -> l left + l right
-      | Postfix {left; _} -> l left
+      | Prefix {right; _} -> right.total_length
+      | Infix {left; right; _} -> left.total_length + right.total_length
+      | Postfix {left; _} -> left.total_length
       | Combinators {parse_node; _} -> Node.length parse_node
     in
-    {info; token_length; total_length = token_length + sub_length; type_tag = tag}
+    {info; token_length; total_length; type_tag}
 
   let token_start_pos ~left_pos = function
     | Leaf _ | Prefix _ | Combinators _ -> left_pos
@@ -174,7 +173,7 @@ module Reuse = struct
       | Leaf _ | Prefix _ | Combinators _ -> assert false
       | Infix {left; _} | Postfix {left; _} ->
         left |> down (Dyn (node, left_pos) :: t) ~left_pos ~seek_pos
-    else (* seek_pos > token_start_pos. *)
+    else (* if seek_pos > token_start_pos *)
       let token_end_pos = token_start_pos + node.token_length in
       if seek_pos < token_end_pos then None, t
       else match info with (* Right. *)
@@ -216,7 +215,7 @@ end
 
 (* NOTE: Currently the end token will always be explicitly read, which is annoying. *)
 
-let rec parse_infix ~prec:parse_prec left ({lexer; reuse; _} as state) =
+let rec parse_infix ~parse_prec left ({lexer; reuse; _} as state) =
   let tag = left.type_tag in
   let o, reuse = reuse |> Reuse.satisfy_at (Lexer.pos lexer) ~tag @@ fun {info; token_length; _} ->
     match info with
@@ -231,21 +230,21 @@ let rec parse_infix ~prec:parse_prec left ({lexer; reuse; _} as state) =
   match o with
   | Some node -> (* Reusing a node. *)
     let lexer = lexer |> Lexer.skip (node.total_length - left.total_length) in
-    {state with lexer; reuse} |> parse_infix ~prec:parse_prec node
+    {state with lexer; reuse} |> parse_infix ~parse_prec node
   | None -> (* Parsing a node. *)
     let token, token_length, lexer = lexer |> Lexer.next in
-    let prec, infix = state.lookups.infixes token in
-    if prec >= parse_prec then
-      (* The next operator has lower precedence so can't be parsed at this level of the parse tree.
-         It will be parsed higher up in the tree (unless it is Infix.unknown). *)
+    let next_prec, infix = state.lookups.infixes token in
+    if next_prec >= parse_prec then
+      (* The next operator has the same or lower precedence so can't be parsed at this level of the
+         parse tree. It will be parsed higher up in the tree (unless it is Infix.unknown). *)
       left, state
     else
       let state = {state with lexer; reuse} in (* Advance the state, moving past the token. *)
       let info, state = infix left state in
       let node = Pratt.make_node info ~token_length ~tag in
-      state |> parse_infix ~prec:parse_prec node
+      state |> parse_infix ~parse_prec node
 
-let parse_prefix ~prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; reuse} as state) =
+let parse_prefix ~parse_prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; reuse} as state) =
   let o, reuse = reuse |> Reuse.satisfy_at (Lexer.pos lexer) ~tag @@ function
     | {info=(Leaf _ | Prefix _ | Combinators _); _} as node -> Some node
     | _ -> None
@@ -268,9 +267,9 @@ let parse_prefix ~prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; reuse}
           let info, state = empty_prefix state in
           Pratt.make_node info ~token_length:0 ~tag, state
         | None ->
-          failwith ("Unknown prefix at pos " ^ string_of_int (Lexer.pos state.lexer))
+          failwith (Printf.sprintf "Unknown prefix at position %i." (Lexer.pos state.lexer))
   in
-  state |> parse_infix ~prec node
+  state |> parse_infix ~parse_prec node
 
 let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok Reuse.t ->
   (tok, a) parser -> (tok, a) parse_node * tok Lexer.t * tok Reuse.t =
@@ -285,7 +284,7 @@ let rec parse : type tok a. lexer:tok Lexer.t -> reuse:tok Reuse.t ->
     | Fix (lazy p) ->
       parse p ~lexer ~reuse
     | Pratt lookups ->
-      let parse_tree, {lexer; _} = {lookups; lexer; reuse} |> parse_prefix ~prec:max_int in
+      let parse_tree, {lexer; _} = {lookups; lexer; reuse} |> parse_prefix ~parse_prec:max_int in
       Node.pratt ~lookups parse_tree, lexer, reuse
     | Lift (f, p) ->
       let node, lexer, reuse = parse p ~lexer ~reuse in
@@ -315,14 +314,14 @@ module Infix = struct
   let left prec f =
     prec,
     fun left state ->
-      let right, state = state |> parse_prefix ~prec in
+      let right, state = state |> parse_prefix ~parse_prec:prec in
       Pratt.infix ~prec ~f ~left ~right, state
 
   let right prec f =
     prec,
     fun left state ->
-      (* Use prec + 1 to make the parse tree right associative. *)
-      let right, state = state |> parse_prefix ~prec:(prec + 1) in
+      (* Using prec + 1 makes the parse tree right associative. *)
+      let right, state = state |> parse_prefix ~parse_prec:(prec + 1) in
       Pratt.infix ~prec:(prec + 1) ~f ~left ~right, state
 
   let postfix ?(prec = -2) f =
@@ -339,7 +338,7 @@ module Prefix = struct
   let return v = some @@ fun state -> Pratt.leaf v, state
 
   let unary ?(prec = -1) f = some @@ fun state ->
-    let right, state = state |> parse_prefix ~prec in
+    let right, state = state |> parse_prefix ~parse_prec:prec in
     Pratt.prefix ~prec ~f ~right, state
 
   let custom parser = some @@ fun ({lexer; reuse; _} as state) ->
@@ -350,8 +349,8 @@ module Prefix = struct
 end
 
 let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.unknown)
-    ?(infixes = fun _ -> Infix.unknown) () =
-  Pratt {prefixes; empty_prefix; infixes; tag = Tag.fresh ()}
+    ?(infixes = fun _ -> Infix.unknown) ?(tag = Tag.fresh ()) () =
+  Pratt {prefixes; empty_prefix; infixes; tag}
 
 module Parse_tree = struct
   type 'a t = E : ('tok, 'a) parse_node -> 'a t
@@ -440,7 +439,7 @@ module Incremental = struct
     pos:int -> lookups:('tok, a) lookups -> ('tok, a) pratt_node ->
     ('tok, a) pratt_node * 'tok Lexer.t * 'tok Reuse.t =
     fun ({start; _} as change) ~lexer ~reuse ~pos ~lookups pratt_node ->
-      let rec incr_parse ~prec ~left_pos {info; token_length; _} =
+      let rec incr_parse ~parse_prec ~left_pos {info; token_length; _} =
         (* The position passed into this function (left_pos) is the position that the node starts
            at, so the position of the token that triggered this node will be equal to this
            position plus the total length of the left sub-node (if there is one). For leaf, prefix
@@ -453,21 +452,21 @@ module Incremental = struct
           match info with
           | Infix {left; _} | Postfix {left; _} ->
             if start <= token_start_pos then (* Update left. *)
-              left |> incr_parse ~prec ~left_pos
+              left |> incr_parse ~parse_prec ~left_pos
             else (* Update the current node. *)
               let lexer = lexer |> Lexer.move_to token_start_pos in
-              {lookups; lexer; reuse} |> parse_infix ~prec left
+              {lookups; lexer; reuse} |> parse_infix ~parse_prec left
           | Leaf _ | Prefix _ | Combinators _ -> (* Update the current node. *)
             let lexer = lexer |> Lexer.move_to token_start_pos in
-            {lookups; lexer; reuse} |> parse_prefix ~prec
+            {lookups; lexer; reuse} |> parse_prefix ~parse_prec
         else (* Update right. *)
           let tag = lookups.tag in
-          let go_right ~prec:prec' make_info right =
-            (* Update right using the precedence of the current node (prec'). *)
-            let right, state = right |> incr_parse ~prec:prec' ~left_pos:token_end_pos in
+          let go_right ~prec make_info right =
+            (* Update right using the precedence of the current node (prec). *)
+            let right, state = right |> incr_parse ~parse_prec:prec ~left_pos:token_end_pos in
             let node = Pratt.make_node (make_info ~right) ~token_length ~tag in
-            (* Start parsing using the precedence of the parent node (prec). *)
-            state |> parse_infix ~prec node
+            (* Start parsing using the precedence of the parent node (parse_prec). *)
+            state |> parse_infix ~parse_prec node
           in
           match info with
           | Prefix {prec; f; right; _} ->
@@ -481,10 +480,10 @@ module Incremental = struct
             let node = Pratt.make_node (Combinators {parser; parse_node}) ~token_length ~tag in
             (* Move the lexer to after the node and parse. *)
             let lexer = lexer |> Lexer.move_to (token_start_pos + node.total_length) in
-            {lookups; lexer; reuse} |> parse_infix ~prec node
+            {lookups; lexer; reuse} |> parse_infix ~parse_prec node
           | Leaf _ | Postfix _ -> invalid_arg "Update start position is out of bounds."
       in
-      let node, {lexer; reuse; _} = pratt_node |> incr_parse ~prec:max_int ~left_pos:pos in
+      let node, {lexer; reuse; _} = pratt_node |> incr_parse ~parse_prec:max_int ~left_pos:pos in
       node, lexer, reuse
 
   let update ~start ~added ~removed ~lexer ({parser; parse_node} as t) =

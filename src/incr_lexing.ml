@@ -29,10 +29,9 @@ module Lexer = struct
 
   let make lex_at = make_at 0 lex_at
 
-  let of_token_list l =
-    let a = Array.of_list l in
+  let of_token_array a =
     let len = Array.length a in
-    make @@ fun i -> Token a.(max i (len - 1)), 1
+    make @@ fun i -> Token a.(min i (len - 1)), 1
 
   let of_ocamllex lex ~make_lexbuf_at =
     let lexbuf_ref = ref (make_lexbuf_at 0) in

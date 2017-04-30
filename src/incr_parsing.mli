@@ -5,7 +5,8 @@ type ('tok, 'a) prefix
 type ('tok, 'a) infix
 
 val pratt_parser : ?prefixes:('tok -> ('tok, 'a) prefix) -> ?empty_prefix:('tok, 'a) prefix ->
-  ?infixes:('tok -> ('tok, 'a) infix) -> unit -> ('tok, 'a) parser
+  ?infixes:('tok -> ('tok, 'a) infix) -> ?tag:'a Tag.t -> unit -> ('tok, 'a) parser
+(** The functions [prefixes] and [infixes] should be pure. *)
 
 module Combinators : sig
   val eat : 'tok -> ('tok, 'tok) parser

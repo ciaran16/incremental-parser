@@ -9,7 +9,7 @@ module Lexer : sig
 
   val make : (int -> 'tok lex_result * int) -> 'tok t
 
-  val of_token_list : 'tok list -> 'tok t
+  val of_token_array : 'tok array -> 'tok t
 
   val of_ocamllex : (Lexing.lexbuf -> 'tok lex_result) -> make_lexbuf_at:(int -> Lexing.lexbuf) ->
     'tok t
@@ -17,7 +17,7 @@ module Lexer : sig
   val pos : 'tok t -> int
 
   val next : 'tok t -> 'tok * int * 'tok t
-  (** Returns a tuple of the form [(token, token_length, lexer)] *)
+  (** Returns a tuple of the form [(token, token_length, lexer)]. *)
 
   val peek : 'tok t -> 'tok
 
