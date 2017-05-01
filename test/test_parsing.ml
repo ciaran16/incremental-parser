@@ -56,12 +56,24 @@ module Incremental_parsing = struct
       "(((-1 + 2) * 3) + 4) * 5"
       ~start:3 ~added:1 ~removed:0
 
+  let update_right_assoc_infixes () = compare
+      "1 ^ 3 ^ 4 ^ 5"
+      "1 ^ 2 ^ 3 ^ 4 ^ 5"
+      ~start:1 ~added:4 ~removed:0
+
+  let update_left_assoc_infixes () = compare
+      "1 + 2 + 3"
+      "1 - 4 + 2 + 3"
+      ~start:1 ~added:4 ~removed:0
+
   let tests = [
     "Incremental update", `Quick, update;
     "Token update", `Quick, update_token;
     "Update just before empty prefix operator", `Quick, update_empty;
     "Update at end", `Quick, update_end;
     "Update nested", `Quick, update_nested;
+    "Update right associative infixes", `Quick, update_right_assoc_infixes;
+    "Update left associative infixes", `Quick, update_left_assoc_infixes;
   ]
 end
 
