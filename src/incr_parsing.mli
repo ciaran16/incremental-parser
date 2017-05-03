@@ -17,6 +17,8 @@ module Combinators : sig
 
   val (<$>) : ('a -> 'b) -> ('tok, 'a) parser -> ('tok, 'b) parser
 
+  val (>>|) : ('tok, 'a) parser -> ('a -> 'b) -> ('tok, 'b) parser
+
   val ( *>) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'b) parser
 
   val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
