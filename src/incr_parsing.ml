@@ -335,24 +335,6 @@ let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.u
     let parse_tree, {lexer; reuse; _} = state |> parse_prefix ~parse_prec:max_int in
     Node.pratt ~lookups parse_tree, lexer, reuse
 
-module Parse_tree = struct
-  type 'a t = E : ('tok, 'a) parse_node -> 'a t
-
-  let of_parse_node node = E node
-
-  let to_ast (E node) = Node.value node
-
-  let length (E node) = Node.length node
-end
-
-module Non_incremental = struct
-  let build_parse_node parser ~lexer =
-    let parse_node, _, _ = parser ~lexer ~reuse:Reuse.empty in
-    parse_node
-
-  let run parser ~lexer = build_parse_node parser ~lexer |> Parse_tree.of_parse_node
-end
-
 module Incremental = struct
   type ('tok, 'a) t = ('tok, 'a) parse_node
 
@@ -362,9 +344,9 @@ module Incremental = struct
     removed : int;
   }
 
-  let make = Non_incremental.build_parse_node
-
-  let parse_tree = Parse_tree.of_parse_node
+  let make parser ~lexer =
+    let parse_node, _, _ = parser ~lexer ~reuse:Reuse.empty in
+    parse_node
 
   let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok Reuse.t ->
     left_pos:int -> ('tok, a) parse_node ->
@@ -470,4 +452,8 @@ module Incremental = struct
       let reuse = Reuse.create parse_node ~start_pos:start ~added ~removed in
       let parse_node, _, _ = parse_node |> update_parse change ~lexer ~reuse ~left_pos:0 in
       parse_node
+
+  let to_ast = Node.value
+
+  let length = Node.length
 end

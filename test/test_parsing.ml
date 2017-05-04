@@ -7,8 +7,8 @@ let expr_lexer_from_string s =
 module Non_incremental_parsing = struct
   let check_length s () =
     let lexer = expr_lexer_from_string s in
-    let parse_tree = Non_incremental.run Expr_parser.expr ~lexer in
-    Alcotest.(check int) "same length" (String.length s) (Parse_tree.length parse_tree)
+    let parse_tree = Incremental.make Expr_parser.expr ~lexer in
+    Alcotest.(check int) "same length" (String.length s) (Incremental.length parse_tree)
 
   let tests = [
     "Empty prefix length 1", `Quick, check_length "if true then 2";
@@ -26,9 +26,8 @@ module Incremental_parsing = struct
   let compare first second ~start ~added ~removed =
     let incr = Incremental.make Expr_parser.expr ~lexer:(expr_lexer_from_string first) in
     let lexer = expr_lexer_from_string second in
-    let incr = incr |> Incremental.update ~start ~added ~removed ~lexer in
-    let e1 = Non_incremental.run Expr_parser.expr ~lexer |> Parse_tree.to_ast in
-    let e2 = Incremental.parse_tree incr |> Parse_tree.to_ast in
+    let e1 = Incremental.make Expr_parser.expr ~lexer |> Incremental.to_ast in
+    let e2 = incr |> Incremental.update ~start ~added ~removed ~lexer |> Incremental.to_ast in
     check_expr "parses equal" e1 e2
 
   let update () = compare
