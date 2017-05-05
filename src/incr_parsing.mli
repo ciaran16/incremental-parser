@@ -11,7 +11,7 @@ val pratt_parser : ?prefixes:('tok -> ('tok, 'a) prefix) -> ?empty_prefix:('tok,
 module Combinators : sig
   val eat : 'tok -> ('tok, 'tok) parser
 
-  val satisfy : ('tok -> 'a option) -> ('tok, 'a) parser
+  val satisfy : ?on_error:'a -> ('tok -> 'a option) -> ('tok, 'a) parser
 
   val (<*>) : ('tok, 'a -> 'b) parser -> ('tok, 'a) parser -> ('tok, 'b) parser
 

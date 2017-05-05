@@ -1,11 +1,9 @@
 module Lexer = Incr_lexing.Lexer
 
-type ('tok, 'a) parser = lexer:'tok Lexer.t -> reuse:'tok dyn_fragment list ->
-  ('tok, 'a) parse_node * 'tok Lexer.t * 'tok dyn_fragment list
-
-and ('tok, _) parse_node =
+type ('tok, _) parse_node =
   | Satisfy : {
       f : 'tok -> 'a option;
+      on_error : 'a option;
       value : 'a;
       length : int;
     } -> ('tok, 'a) parse_node
@@ -57,8 +55,6 @@ and ('tok, 'a) pratt_info =
     }
   | Combinators of ('tok, 'a) parse_node
 
-and 'tok dyn_fragment = Dyn : ('tok, 'a) pratt_node * int -> 'tok dyn_fragment
-
 and ('tok, 'a) lookups = {
   prefixes : ('tok -> ('tok, 'a) prefix);
   empty_prefix : ('tok, 'a) prefix;
@@ -72,11 +68,16 @@ and ('tok, 'a) state = {
   reuse : 'tok dyn_fragment list;
 }
 
+and 'tok dyn_fragment = Dyn : ('tok, 'a) pratt_node * int -> 'tok dyn_fragment
+
 and ('tok, 'a) state_f = ('tok, 'a) state -> (('tok, 'a) pratt_info * 'a) * ('tok, 'a) state
 
 and ('tok, 'a) prefix = ('tok, 'a) state_f option
 
 and ('tok, 'a) infix = int * (('tok, 'a) pratt_node -> ('tok, 'a) state_f)
+
+type ('tok, 'a) parser = lexer:'tok Lexer.t -> reuse:'tok dyn_fragment list ->
+  ('tok, 'a) parse_node * 'tok Lexer.t * 'tok dyn_fragment list
 
 module Node = struct
   let value = function
@@ -87,7 +88,7 @@ module Node = struct
     | Satisfy {length; _} | App {length; _} | Lift {length; _} -> length
     | Pratt_parse {pratt_node; _} -> pratt_node.total_length
 
-  let satisfy ~f value ~length = Satisfy {f; value; length}
+  let satisfy ~f ~on_error value ~length = Satisfy {f; on_error; value; length}
 
   let pratt ~lookups pratt_node = Pratt_parse {lookups; pratt_node}
 
@@ -256,13 +257,20 @@ let parse_prefix ~parse_prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; 
   state |> parse_infix ~parse_prec node
 
 module Combinators = struct
-  let satisfy f = fun ~lexer ~reuse ->
+  let satisfy ?on_error f = fun ~lexer ~reuse ->
     let token, length, lexer' = lexer |> Lexer.next in
     match f token with
-    | Some v -> Node.satisfy ~f v ~length, lexer', reuse
-    | None -> failwith @@ Printf.sprintf "Satisfy failed at position %i." (Lexer.pos lexer)
+    | Some v -> Node.satisfy ~f ~on_error v ~length, lexer', reuse (* Advance the lexer. *)
+    | None ->
+      match on_error with
+      | Some v ->
+        Printf.printf "Using error value for satisfy at position %i." (Lexer.pos lexer);
+        Node.satisfy ~f ~on_error v ~length, lexer, reuse (* Do not advance the lexer. *)
+      | None -> failwith @@ Printf.sprintf "Satisfy failed at position %i." (Lexer.pos lexer)
 
-  let eat token = satisfy (fun token' -> if token = token' then Some token else None)
+  let eat token =
+    let tokens_equal token' = if token = token' then Some token else None in
+    satisfy tokens_equal ~on_error:token
 
   let lift f p = fun ~lexer ~reuse ->
     let node, lexer, reuse = p ~lexer ~reuse in
@@ -352,9 +360,9 @@ module Incremental = struct
     left_pos:int -> ('tok, a) parse_node ->
     ('tok, a) parse_node * 'tok Lexer.t * 'tok Reuse.t =
     fun ({start_pos; added; removed} as change) ~lexer ~reuse ~left_pos -> function
-      | Satisfy {f; length; _} ->
+      | Satisfy {f; on_error; length; _} ->
         assert (start_pos >= left_pos && start_pos <= left_pos + length);
-        Combinators.satisfy f ~lexer:(Lexer.move_to left_pos lexer) ~reuse
+        Combinators.satisfy f ?on_error ~lexer:(Lexer.move_to left_pos lexer) ~reuse
       | Pratt_parse {lookups; pratt_node} ->
         let node, lexer, reuse = update_pratt change ~lexer ~reuse ~left_pos ~lookups pratt_node in
         Node.pratt ~lookups node, lexer, reuse
@@ -367,7 +375,8 @@ module Incremental = struct
            If the start position is equal to or before the mid position then the left needs to be
            updated first and then possibly the right as well. The reason we also check if they're
            equal is because of the longest match rule used lexing, which means the token to the
-           left could have changed. *)
+           left could have changed, and also because errors can cause Satisfy nodes to have a
+           length of zero. *)
         if start_pos > mid_pos then (* Update right only. *)
           let right, lexer, reuse = right |> update_parse change ~lexer ~reuse ~left_pos:mid_pos in
           Node.app left right, lexer, reuse
