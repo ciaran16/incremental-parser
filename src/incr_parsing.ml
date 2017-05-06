@@ -31,7 +31,7 @@ and ('tok, 'a) pratt_node = {
   token_length : int; (* Length of the token that triggered the creation of the node.
                          This might be 0 if the parse was triggered by the empty prefix. *)
   total_length : int; (* Length of this node (token_length) + length of sub-nodes. *)
-  type_tag : 'a Tag.t;
+  type_tag : 'a Type_tag.t;
 }
 
 and ('tok, 'a) pratt_info =
@@ -59,7 +59,7 @@ and ('tok, 'a) lookups = {
   prefixes : ('tok -> ('tok, 'a) prefix);
   empty_prefix : ('tok, 'a) prefix;
   infixes : ('tok -> ('tok, 'a) infix);
-  tag : 'a Tag.t;
+  tag : 'a Type_tag.t;
 }
 
 and ('tok, 'a) state = {
@@ -184,15 +184,15 @@ module Reuse = struct
       if seek_pos < Pratt.token_start_pos info ~left_pos then None, t
       else t |> seek ~seek_pos
 
-  let satisfy_at (type a) seek_pos ~(tag : a Tag.t)
+  let satisfy_at (type a) seek_pos ~(tag : a Type_tag.t)
       (check_f : ('tok, a) pratt_node -> ('tok, a) pratt_node option) t :
     ('tok, a) pratt_node option * 'tok t =
     match t |> seek_right ~seek_pos with
     | None, t -> None, t
     | Some (Dyn (node, _) as hd), t ->
-      match Tag.compare node.type_tag tag with
-      | Tag.Not_equal -> None, hd::t
-      | Tag.Equal ->
+      match Type_tag.compare node.type_tag tag with
+      | Type_tag.Not_equal -> None, hd::t
+      | Type_tag.Equal ->
         match check_f node with
         | None -> None, hd::t
         | Some _ as some -> Printf.printf "Reusing node at position %i.\n" seek_pos; some, t
@@ -336,7 +336,7 @@ module Prefix = struct
 end
 
 let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.unknown)
-    ?(infixes = fun _ -> Infix.unknown) ?(tag = Tag.fresh ()) () =
+    ?(infixes = fun _ -> Infix.unknown) ?(tag = Type_tag.fresh ()) () =
   let lookups = {prefixes; empty_prefix; infixes; tag} in
   fun ~lexer ~reuse ->
     let state = {lookups; lexer; reuse} in
@@ -352,9 +352,15 @@ module Incremental = struct
     removed : int;
   }
 
-  let make parser ~lexer =
-    let parse_node, _, _ = parser ~lexer ~reuse:Reuse.empty in
-    parse_node
+  let with_tag_check f =
+    let count = Type_tag.tag_count () in
+    let result = f () in
+    if count <> Type_tag.tag_count () then
+      prerr_endline "Warning: type tags should not be generated during parsing.";
+    result
+
+  let make parser ~lexer = with_tag_check @@ fun () ->
+    let parse_node, _, _ = parser ~lexer ~reuse:Reuse.empty in parse_node
 
   let rec update_parse : type a. change_loc -> lexer:'tok Lexer.t -> reuse:'tok Reuse.t ->
     left_pos:int -> ('tok, a) parse_node ->
@@ -459,6 +465,7 @@ module Incremental = struct
     else
       let change = {start_pos = start; added; removed} in
       let reuse = Reuse.create parse_node ~start_pos:start ~added ~removed in
+      with_tag_check @@ fun () ->
       let parse_node, _, _ = parse_node |> update_parse change ~lexer ~reuse ~left_pos:0 in
       parse_node
 

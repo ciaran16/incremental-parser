@@ -12,13 +12,17 @@ type (_, _) equal =
   | Equal : ('a, 'a) equal
   | Not_equal : ('a, 'b) equal
 
-let fresh (type aa) () : aa t = (
-  module struct
+let count = ref 0
+
+let tag_count () = !count
+
+let fresh (type aa) () : aa t =
+  count := !count + 1;
+  (module struct
     type a = aa
 
     type _ tag += Tag : a tag
-  end
-)
+  end)
 
 let compare (type a) (type b) ((module X) : a t) ((module Y) : b t) : (a, b) equal =
   match X.Tag with

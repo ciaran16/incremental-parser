@@ -7,3 +7,5 @@ type (_, _) equal =
 val fresh : unit -> 'a t
 
 val compare : 'a t -> 'b t -> ('a, 'b) equal
+
+val tag_count : unit -> int
