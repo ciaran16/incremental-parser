@@ -1,26 +1,29 @@
-open Gadt_tree
 open Json_lexer
 open Incr_parsing
 open Combinators
 
 type json =
-  | Obj of (string * json) F_array.t
-  | Arr of json F_array.t
-  | Str of string
-  | Number of float
-  | Bool of bool
+  | Obj of (string * json) list
+  | Arr of json list
+  | String_lit of string
+  | Int_lit of int
+  | Float_lit of float
+  | Bool_lit of bool
   | Null
 
 let value = fix @@ fun value ->
-  let name = satisfy (function STRING s -> Some s | _ -> None) in
-  let pair = (fun n v -> (n, v)) <$> name <*> eat COLON *> value in
+  let key = satisfy (function STRING s -> Some s | _ -> None) in
+  let pair = (fun k v -> (k, v)) <$> key <*> eat COLON *> value in
+  let pair_list = list_of pair ~sep:COMMA ~close:OBJ_END in
+  let value_list = list_of value ~sep:COMMA ~close:ARRAY_END in
   let prefixes = function
-  (*| OBJ_START ->   Prefix.list pair ~sep:COMMA ~close:OBJ_END (fun o -> Obj o)
-    | ARRAY_START -> Prefix.list value ~sep:COMMA ~close:ARRAY_END (fun a -> Arr a) *)
-    | BOOL b ->      Prefix.return (Bool b)
+    | OBJ_START ->   Prefix.custom (pair_list >>| fun l -> Obj l)
+    | ARRAY_START -> Prefix.custom (value_list >>| fun l -> Arr l)
+    | STRING s ->    Prefix.return (String_lit s)
+    | INT n ->       Prefix.return (Int_lit n)
+    | FLOAT f ->     Prefix.return (Float_lit f)
+    | BOOL b ->      Prefix.return (Bool_lit b)
     | NULL ->        Prefix.return Null
-    | STRING s ->    Prefix.return (Str s)
-    | NUMBER n ->    Prefix.return (Number n)
     | _ ->           Prefix.unknown
   in
   pratt_parser ~prefixes ()

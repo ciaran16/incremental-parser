@@ -1,6 +1,4 @@
 {
-open Incr_lexing
-
 type token =
   | END
   | OBJ_START | OBJ_END
@@ -9,36 +7,36 @@ type token =
   | COMMA
   | BOOL of bool
   | NULL
-  | NUMBER of float
+  | FLOAT of float
+  | INT of int
   | STRING of string
 }
 
 let digit = ['0'-'9']
 let frac = '.' digit+
-let exp = ['e' 'E'] ['+' '-'] digit+
-let number = '-'? ('0' | (['1'-'9'] digit*)) frac? exp?
-let not_num = (digit | ['.' 'e' 'E' '+' '-'])+
+let exp = ['e' 'E'] ['+' '-']? digit+
+let int = '-'? ('0' | (['1'-'9'] digit*))
+let float = int frac? exp?
 
 rule lex = parse
   | ' ' | '\t' | '\n' | '\r' { lex lexbuf }
-  | number { token @@ NUMBER (float_of_string (Lexing.lexeme lexbuf)) }
+  | int { INT (int_of_string (Lexing.lexeme lexbuf)) }
+  | float { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }
   | '"' { lex_string (Buffer.create 16) lexbuf }
-  | '{' { token OBJ_START }
-  | '}' { token OBJ_END }
-  | ':' { token COLON }
-  | '[' { token ARRAY_START }
-  | ']' { token ARRAY_END }
-  | ',' { token COMMA }
-  | "true" { token (BOOL true) }
-  | "false" { token (BOOL false) }
-  | "null" { token NULL }
-  | eof { token END }
-  | ['a'-'z' 'A'-'Z']+ { error ("Unknown identifier '" ^ Lexing.lexeme lexbuf ^ "'.") }
-  | not_num { error ("Incorrectly formatted number '" ^ Lexing.lexeme lexbuf ^ "'.") }
-  | _ { error ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }
+  | '{' { OBJ_START }
+  | '}' { OBJ_END }
+  | ':' { COLON }
+  | '[' { ARRAY_START }
+  | ']' { ARRAY_END }
+  | ',' { COMMA }
+  | "true" { (BOOL true) }
+  | "false" { (BOOL false) }
+  | "null" { NULL }
+  | eof { END }
+  | _ { failwith ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }
 
 and lex_string b = parse
-  | '"' { token @@ STRING (Buffer.contents b) }
+  | '"' { STRING (Buffer.contents b) }
   | '\\' 'b' { Buffer.add_char b '\b'; lex_string b lexbuf }
   | '\\' 'f' { Buffer.add_char b '\012'; lex_string b lexbuf }
   | '\\' 'n' { Buffer.add_char b '\n'; lex_string b lexbuf }
@@ -47,4 +45,4 @@ and lex_string b = parse
   | '\\' 'u' _ _ _ _ { lex_string b lexbuf } (* Unicode escape sequences are skipped for now. *)
   | '\\' (_ as c) { Buffer.add_char b c; lex_string b lexbuf }
   | [^ '"' '\\']+ { Buffer.add_string b (Lexing.lexeme lexbuf); lex_string b lexbuf }
-  | eof | _ { error "Unterminated string." ~token:(STRING (Buffer.contents b)) }
+  | eof | _ { failwith "Unterminated string." }
