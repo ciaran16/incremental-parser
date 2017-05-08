@@ -7,12 +7,13 @@ val error : ?token:'tok -> string -> 'tok lex_result
 module Lexer : sig
   type 'tok t
 
-  val make : (int -> 'tok lex_result * int) -> 'tok t
+  val make : (int -> 'tok * int) -> 'tok t
+
+  val handle_errors : 'tok lex_result t -> 'tok t
 
   val of_token_array : 'tok array -> 'tok t
 
-  val of_ocamllex : (Lexing.lexbuf -> 'tok lex_result) -> make_lexbuf_at:(int -> Lexing.lexbuf) ->
-    'tok t
+  val of_ocamllex : (Lexing.lexbuf -> 'tok) -> make_lexbuf_at:(int -> Lexing.lexbuf) -> 'tok t
 
   val pos : 'tok t -> int
 

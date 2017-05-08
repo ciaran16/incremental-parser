@@ -12,31 +12,31 @@ let error ?token msg =
 
 module Lexer = struct
   type 'tok t = {
-    lex_at : 'tok lex_at_function;
+    lex_at : int -> 'tok * int;
     pos : int;
     next : ('tok * int) Lazy.t;
   }
 
-  and 'tok lex_at_function = (int -> 'tok lex_result * int)
+  let make_at pos lex_at = {lex_at; pos; next = lazy (lex_at pos)}
 
-  let make_at pos lex_at =
+  let make lex_at = make_at 0 lex_at
+
+  let handle_errors {lex_at; pos; _} =
     (* TODO need to do something with error messages. *)
     let rec lex_until_token pos = match lex_at pos with
       | Token token, len | Error_with_token (token, _), len -> token, pos + len
       | Error_msg _, len -> lex_until_token (pos + len)
     in
-    {lex_at; pos; next = lazy (lex_until_token pos)}
-
-  let make lex_at = make_at 0 lex_at
+    make_at pos lex_until_token
 
   let of_token_array a =
     let len = Array.length a in
-    make @@ fun i -> Token a.(min i (len - 1)), 1
+    make @@ fun i -> a.(min i (len - 1)), 1
 
   let of_ocamllex lex ~make_lexbuf_at =
     let lexbuf_ref = ref (make_lexbuf_at 0) in
     let last_pos_ref = ref 0 in
-    let lex_at pos =
+    make @@ fun pos ->
       let lexbuf =
         if pos <> !last_pos_ref then lexbuf_ref := make_lexbuf_at pos;
         !lexbuf_ref
@@ -47,8 +47,6 @@ module Lexer = struct
       let length = Lexing.lexeme_end lexbuf - lexbuf_pos in
       last_pos_ref := pos + length;
       lex_result, length
-    in
-    make lex_at
 
   let pos {pos; _} = pos
 

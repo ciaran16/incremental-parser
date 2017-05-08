@@ -2,7 +2,7 @@ open Incr_parsing
 
 let expr_lexer_from_string s =
   let make_lexbuf_at pos = Lexing.from_string (String.sub s pos (String.length s - pos)) in
-  Incr_lexing.Lexer.of_ocamllex Expr_lexer.lex ~make_lexbuf_at
+  Incr_lexing.Lexer.(handle_errors @@ of_ocamllex Expr_lexer.lex ~make_lexbuf_at)
 
 module Non_incremental_parsing = struct
   let check_length s () =
