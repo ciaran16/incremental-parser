@@ -20,15 +20,17 @@ type expr =
   | Var of string
 
 let expr = fix @@ fun expr ->
-  let if_ e1 e2 e_o = If (e1, e2, e_o) in
-  let let_ x e1 e2 = Let (x, e1, e2) in
-  let ident = satisfy (function IDENT x -> Some x | _ -> None) in
-  let parse_else =
+  let parse_if =
     let prefixes = function
-      | ELSE ->  Prefix.custom ((fun e -> Some e) <$> expr)
-      | _ ->     Prefix.unknown
+      | ELSE -> Prefix.custom ((fun e -> Some e) <$> expr)
+      | _ ->    Prefix.unknown
     in
-    pratt_parser ~prefixes ~empty_prefix:(Prefix.return None) ()
+    let parse_else = pratt_parser ~prefixes ~empty_prefix:(Prefix.return None) () in
+    (fun e1 e2 e_o -> If (e1, e2, e_o)) <$> expr <*> eat THEN *> expr <*> parse_else
+  in
+  let parse_let =
+    let ident = satisfy (function IDENT x -> Some x | _ -> None) in
+    (fun x e1 e2 -> Let (x, e1, e2)) <$> ident <*> eat EQUALS *> expr <*> eat IN *> expr
   in
   let prefixes = function
     | INT n ->   Prefix.return (Int_lit n)
@@ -37,8 +39,8 @@ let expr = fix @@ fun expr ->
     | MINUS ->   Prefix.unary  (fun e -> Neg e)
     | IDENT x -> Prefix.return (Var x)
     | PAREN_L -> Prefix.custom (expr <* eat PAREN_R)
-    | IF ->      Prefix.custom (if_ <$> expr <*> eat THEN *> expr <*> parse_else)
-    | LET ->     Prefix.custom (let_ <$> ident <*> eat EQUALS *> expr <*> eat IN *> expr)
+    | IF ->      Prefix.custom parse_if
+    | LET ->     Prefix.custom parse_let
     | _ ->       Prefix.unknown
   in
   let infixes = function
