@@ -256,47 +256,6 @@ let parse_prefix ~parse_prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; 
   in
   state |> parse_infix ~parse_prec node
 
-module Combinators = struct
-  let satisfy ?on_error f = fun ~lexer ~reuse ->
-    let token, length, lexer' = lexer |> Lexer.next in
-    match f token with
-    | Some v -> Node.satisfy ~f ~on_error v ~length, lexer', reuse (* Advance the lexer. *)
-    | None ->
-      match on_error with
-      | Some v ->
-        Printf.printf "Using error value for satisfy at position %i." (Lexer.pos lexer);
-        Node.satisfy ~f ~on_error v ~length, lexer, reuse (* Do not advance the lexer. *)
-      | None -> failwith @@ Printf.sprintf "Satisfy failed at position %i." (Lexer.pos lexer)
-
-  let eat token =
-    let tokens_equal token' = if token = token' then Some token else None in
-    satisfy tokens_equal ~on_error:token
-
-  let lift f p = fun ~lexer ~reuse ->
-    let node, lexer, reuse = p ~lexer ~reuse in
-    Node.lift ~f node, lexer, reuse
-
-  let (<$>) = lift
-
-  let (>>|) p f = lift f p
-
-  let app p q = fun ~lexer ~reuse ->
-    let left, lexer, reuse = p ~lexer ~reuse in
-    let right, lexer, reuse = q ~lexer ~reuse in
-    Node.app left right, lexer, reuse
-
-  let (<*>) = app
-
-  let ( *>) p q = (fun _ x -> x) <$> p <*> q
-
-  let (<* ) p q = (fun x _ -> x) <$> p <*> q
-
-  let fix f =
-    let rec fixed = lazy (f p)
-    and p ~lexer ~reuse = Lazy.force fixed ~lexer ~reuse in
-    Lazy.force fixed
-end
-
 module Infix = struct
   let left prec f =
     prec,
@@ -342,6 +301,58 @@ let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.u
     let state = {lookups; lexer; reuse} in
     let parse_tree, {lexer; reuse; _} = state |> parse_prefix ~parse_prec:max_int in
     Node.pratt ~lookups parse_tree, lexer, reuse
+
+module Combinators = struct
+  let satisfy ?on_error f = fun ~lexer ~reuse ->
+    let token, length, lexer' = lexer |> Lexer.next in
+    match f token with
+    | Some v -> Node.satisfy ~f ~on_error v ~length, lexer', reuse (* Advance the lexer. *)
+    | None ->
+      match on_error with
+      | Some v ->
+        Printf.printf "Using error value for satisfy at position %i." (Lexer.pos lexer);
+        Node.satisfy ~f ~on_error v ~length, lexer, reuse (* Do not advance the lexer. *)
+      | None -> failwith @@ Printf.sprintf "Satisfy failed at position %i." (Lexer.pos lexer)
+
+  let eat token =
+    let tokens_equal token' = if token = token' then Some token else None in
+    satisfy tokens_equal ~on_error:token
+
+  let lift f p = fun ~lexer ~reuse ->
+    let node, lexer, reuse = p ~lexer ~reuse in
+    Node.lift ~f node, lexer, reuse
+
+  let (<$>) = lift
+
+  let (>>|) p f = lift f p
+
+  let app p q = fun ~lexer ~reuse ->
+    let left, lexer, reuse = p ~lexer ~reuse in
+    let right, lexer, reuse = q ~lexer ~reuse in
+    Node.app left right, lexer, reuse
+
+  let (<*>) = app
+
+  let ( *>) p q = (fun _ x -> x) <$> p <*> q
+
+  let (<* ) p q = (fun x _ -> x) <$> p <*> q
+
+  let fix f =
+    let rec fixed = lazy (f p)
+    and p ~lexer ~reuse = Lazy.force fixed ~lexer ~reuse in
+    Lazy.force fixed
+
+  let list_of p ~sep ~close =
+    let non_empty =
+      let rev_app_one tl = function [hd] -> hd::tl | _ -> assert false in
+      let empty_prefix = Prefix.custom (p >>| fun x -> [x]) in
+      let infixes token = if token = sep then Infix.left 1 rev_app_one else Infix.unknown in
+      List.rev <$> pratt_parser ~empty_prefix ~infixes ()
+    in
+    let prefixes token = if token = close then Prefix.return [] else Prefix.unknown in
+    let empty_prefix = Prefix.custom (non_empty <* eat close) in
+    pratt_parser ~prefixes ~empty_prefix ()
+end
 
 module Incremental = struct
   type ('tok, 'a) t = ('tok, 'a) parse_node

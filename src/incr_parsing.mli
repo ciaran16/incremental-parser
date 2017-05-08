@@ -4,11 +4,6 @@ type ('tok, 'a) prefix
 
 type ('tok, 'a) infix
 
-val pratt_parser : ?prefixes:('tok -> ('tok, 'a) prefix) -> ?empty_prefix:('tok, 'a) prefix ->
-  ?infixes:('tok -> ('tok, 'a) infix) -> ?tag:'a Type_tag.t -> unit -> ('tok, 'a) parser
-(** The functions [prefixes] and [infixes] should be pure.
-    This function should not be called during parsing. *)
-
 module Combinators : sig
   val eat : 'tok -> ('tok, 'tok) parser
 
@@ -25,7 +20,16 @@ module Combinators : sig
   val (<* ) : ('tok, 'a) parser -> ('tok, 'b) parser -> ('tok, 'a) parser
 
   val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
+
+  val list_of : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a list) parser
+  (** [list_of p ~sep ~close] parses the list separated by the token [sep] and also parses the token
+      that closes the list. *)
 end
+
+val pratt_parser : ?prefixes:('tok -> ('tok, 'a) prefix) -> ?empty_prefix:('tok, 'a) prefix ->
+  ?infixes:('tok -> ('tok, 'a) infix) -> ?tag:'a Type_tag.t -> unit -> ('tok, 'a) parser
+(** The functions [prefixes] and [infixes] should be pure.
+    This function should not be called during parsing. *)
 
 (** A higher precedence is given by a lower number.
     A precendece of 1 is higher than a precedence of 2. *)
