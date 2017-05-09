@@ -23,11 +23,11 @@ module Lexer = struct
 
   let handle_errors {lex_at; pos; _} =
     (* TODO need to do something with error messages. *)
-    let rec lex_until_token pos = match lex_at pos with
-      | Token token, len | Error_with_token (token, _), len -> token, pos + len
-      | Error_msg _, len -> lex_until_token (pos + len)
+    let rec lex_until_token total_len pos = match lex_at pos with
+      | Token token, len | Error_with_token (token, _), len -> token, total_len + len
+      | Error_msg _, len -> lex_until_token (total_len + len) (pos + len)
     in
-    make_at pos lex_until_token
+    make_at pos (lex_until_token 0)
 
   let of_token_array a =
     let len = Array.length a in
@@ -50,8 +50,8 @@ module Lexer = struct
 
   let pos {pos; _} = pos
 
-  let next {lex_at; pos; next = lazy (token, pos')} =
-    token, pos' - pos, make_at pos' lex_at
+  let next {lex_at; pos; next = lazy (token, len)} =
+    token, len, make_at (pos + len) lex_at
 
   let peek {next = lazy (token, _); _} = token
 
