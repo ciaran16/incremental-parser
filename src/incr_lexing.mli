@@ -13,6 +13,8 @@ module Lexer : sig
 
   val of_token_array : 'tok array -> 'tok t
 
+  val of_token_and_length_array : ('tok * int) array -> 'tok t
+
   val of_ocamllex : (Lexing.lexbuf -> 'tok) -> make_lexbuf_at:(int -> Lexing.lexbuf) -> 'tok t
 
   val pos : 'tok t -> int

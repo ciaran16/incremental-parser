@@ -464,6 +464,7 @@ module Parse_tree = struct
     result
 
   let create parser ~lexer = with_tag_check @@ fun () ->
+    let lexer = lexer |> Lexer.move_to 0 in
     let t, _, _ = parser ~lexer ~reuse:[] in t
 
   let update ~start ~added ~removed ~lexer t =
