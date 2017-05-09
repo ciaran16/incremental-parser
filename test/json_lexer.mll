@@ -10,6 +10,11 @@ type token =
   | FLOAT of float
   | INT of int
   | STRING of string
+
+let rev_concat = function
+| [] -> ""
+| [s] -> s
+| l -> List.rev l |> String.concat ""
 }
 
 let digit = ['0'-'9']
@@ -20,9 +25,9 @@ let float = int frac? exp?
 
 rule lex = parse
   | ' ' | '\t' | '\n' | '\r' { lex lexbuf }
-  | int { INT (int_of_string (Lexing.lexeme lexbuf)) }
-  | float { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }
-  | '"' { lex_string (Buffer.create 16) lexbuf }
+  | int as n { INT (int_of_string n) }
+  | float as f { FLOAT (float_of_string f) }
+  | '"' { lex_string [] lexbuf }
   | '{' { OBJ_START }
   | '}' { OBJ_END }
   | ':' { COLON }
@@ -35,14 +40,14 @@ rule lex = parse
   | eof { END }
   | _ { failwith ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }
 
-and lex_string b = parse
-  | '"' { STRING (Buffer.contents b) }
-  | '\\' 'b' { Buffer.add_char b '\b'; lex_string b lexbuf }
-  | '\\' 'f' { Buffer.add_char b '\012'; lex_string b lexbuf }
-  | '\\' 'n' { Buffer.add_char b '\n'; lex_string b lexbuf }
-  | '\\' 'r' { Buffer.add_char b '\r'; lex_string b lexbuf }
-  | '\\' 't' { Buffer.add_char b '\t'; lex_string b lexbuf }
-  | '\\' 'u' _ _ _ _ { lex_string b lexbuf } (* Unicode escape sequences are skipped for now. *)
-  | '\\' (_ as c) { Buffer.add_char b c; lex_string b lexbuf }
-  | [^ '"' '\\']+ { Buffer.add_string b (Lexing.lexeme lexbuf); lex_string b lexbuf }
+and lex_string acc = parse
+  | '"' { STRING (rev_concat acc) }
+  | '\\' 'b' { lex_string ("\b"::acc) lexbuf }
+  | '\\' 'f' { lex_string ("\012"::acc) lexbuf }
+  | '\\' 'n' { lex_string ("\n"::acc) lexbuf  }
+  | '\\' 'r' { lex_string ("\r"::acc) lexbuf  }
+  | '\\' 't' { lex_string ("\t"::acc) lexbuf  }
+  | '\\' 'u' _ _ _ _ { lex_string acc lexbuf } (* Unicode escape sequences are skipped for now. *)
+  | '\\' (_ as c) { lex_string (String.make 1 c :: acc) lexbuf  }
+  | [^ '"' '\\']+ as s { lex_string (s::acc) lexbuf }
   | eof | _ { failwith "Unterminated string." }
