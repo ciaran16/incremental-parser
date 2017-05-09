@@ -4,14 +4,6 @@ let extract_exn s = function
   | None -> raise (Out_of_bounds s)
   | Some x -> x
 
-module List = struct
-  include List
-
-  (* This makes map tail recursive, in order to avoid stack overflows.
-     The functions that use it are unlikely to be working on very long lists but just in case. *)
-  let map f l = l |> List.rev |> List.rev_map f
-end
-
 include struct [@@@warning "-37"]
   type z
 
