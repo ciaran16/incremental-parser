@@ -1,0 +1,3 @@
+This directory contains very large files used for testing so is not tracked by git.
+
+citylots.json: A JSON file representing San Francisco's subdivision parcels that is almost 200 MB in size. Available at github.com/zemirco/sf-city-lots-json.

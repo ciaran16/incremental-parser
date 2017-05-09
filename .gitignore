@@ -1,3 +1,6 @@
 _build/
 *.byte
 *.native
+
+benchmarks/data/*
+!benchmarks/data/info.txt
