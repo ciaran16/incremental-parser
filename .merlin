@@ -4,4 +4,4 @@ S src test benchmarks
 
 B _build/**
 
-PKG alcotest core_bench yojson
+PKG alcotest core_bench yojson angstrom

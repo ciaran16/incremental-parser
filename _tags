@@ -6,4 +6,4 @@ true : warn(+a-4-42-48), bin_annot, safe_string
 <test/*> : package(alcotest)
 
 <benchmarks> : include
-<benchmarks/*> : thread, package(core_bench), package(yojson)
+<benchmarks/*> : thread, package(core_bench), package(yojson), package(angstrom)
