@@ -1,7 +1,7 @@
 FLG -w +a-4-34-37-42-48
 
-S src
+S src test benchmarks
 
 B _build/**
 
-PKG alcotest
+PKG alcotest core_bench yojson
