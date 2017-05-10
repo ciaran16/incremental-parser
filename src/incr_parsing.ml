@@ -166,8 +166,9 @@ module Reuse = struct
         | Prefix {right; _} | Infix {right; _} ->
           right |> down t ~left_pos:token_end_pos ~seek_pos
         | Combinators parse_node ->
+          (* TODO this needs improving. *)
           let o, t' = parse_node |> extract_pratt ~left_pos:token_end_pos |> seek ~seek_pos in
-          o, t' @ t
+          o, List.rev_append (List.rev t') t
 
   let create parse_tree ~start_pos ~added ~removed =
     (* We align the original parse tree to the new parse tree by starting with an offset. Then we
@@ -195,7 +196,7 @@ module Reuse = struct
       | Type_tag.Equal ->
         match check_f node with
         | None -> None, hd::t
-        | Some _ as some -> Printf.printf "Reusing node at position %i.\n" seek_pos; some, t
+        | Some _ as some -> some, t
 end
 
 (* NOTE: Currently the end token will always be explicitly lexed / read, which is annoying. *)
