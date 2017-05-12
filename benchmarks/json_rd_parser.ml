@@ -1,5 +1,13 @@
 open Json_lexer
-open Json_parser
+
+type json =
+  | Obj of (string * json) list
+  | Arr of json list
+  | String_lit of string
+  | Int_lit of int
+  | Float_lit of float
+  | Bool_lit of bool
+  | Null
 
 let parse lexbuf =
   let next_ref = ref (lex lexbuf) in

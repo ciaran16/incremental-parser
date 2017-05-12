@@ -1,10 +1,10 @@
 open Incr_lexing
 
-type ('tok, 'a) t
-
 type ('tok, 'a) parser
 
 module Parse_tree : sig
+  type ('tok, 'a) t
+
   val create : ('tok, 'a) parser -> lexer:'tok Incr_lexer.t -> ('tok, 'a) t
 
   val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexer.t ->
@@ -44,6 +44,8 @@ module Infix : sig
 
   val right : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
 
+  val both : int -> ('a -> 'a -> 'a) -> ('tok, 'a) infix
+
   val postfix : ?prec:int -> ('a -> 'a) -> ('tok, 'a) infix
   (** The default precedence is -2 (a very high precedence), as postfix operators usually have
       higher precedence than prefix and infix operators. *)
@@ -72,4 +74,10 @@ module Combinators : sig
   (** [list_of p ~sep ~close] parses the list separated by the token [sep] and also parses the token
       that closes the list. It does not parse the opening token. This function should not be called
       during parsing. *)
+
+  type 'a tree =
+    | Leaf of 'a
+    | Branch of 'a tree * 'a tree
+
+  val tree_of :  ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a tree option) parser
 end

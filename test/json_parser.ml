@@ -3,8 +3,8 @@ open Incr_parsing
 open Combinators
 
 type json =
-  | Obj of (string * json) list
-  | Arr of json list
+  | Obj of (string * json) tree option
+  | Arr of json tree option
   | String_lit of string
   | Int_lit of int
   | Float_lit of float
@@ -14,8 +14,8 @@ type json =
 let value = fix @@ fun value ->
   let key = satisfy (function STRING s -> Some s | _ -> None) in
   let pair = (fun k v -> (k, v)) <$> key <*> eat COLON *> value in
-  let pair_list = list_of pair ~sep:COMMA ~close:OBJ_END in
-  let value_list = list_of value ~sep:COMMA ~close:ARRAY_END in
+  let pair_list = tree_of pair ~sep:COMMA ~close:OBJ_END in
+  let value_list = tree_of value ~sep:COMMA ~close:ARRAY_END in
   let prefixes = function
     | OBJ_START ->   Prefix.custom (pair_list >>| fun l -> Obj l)
     | ARRAY_START -> Prefix.custom (value_list >>| fun l -> Arr l)

@@ -20,16 +20,17 @@ module Non_incremental_parsing = struct
 end
 
 module Incremental_parsing = struct
-  let expr_testable = Alcotest.of_pp (fun ppf _e -> Format.pp_print_string ppf "<expr>")
+  let expr_testable = Alcotest.of_pp Expr_parser.pretty_print
 
   let check_expr = Alcotest.check expr_testable
 
   let compare first second ~start ~added ~removed =
     let parse_tree = Parse_tree.create Expr_parser.expr ~lexer:(expr_lexer_from_string first) in
     let lexer = expr_lexer_from_string second in
-    let e1 = Parse_tree.create Expr_parser.expr ~lexer |> Parse_tree.value in
-    let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer |> Parse_tree.value in
-    check_expr "parses equal" e1 e2
+    let e1 = Parse_tree.create Expr_parser.expr ~lexer in
+    let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer in
+    Alcotest.(check int "lengths equal" (Parse_tree.length e1) (Parse_tree.length e2));
+    check_expr "parses equal" (Parse_tree.value e1) (Parse_tree.value e2)
 
   let update () = compare
       "3 * (4 + 5 * 6!) - -3"

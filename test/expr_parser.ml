@@ -46,9 +46,9 @@ let expr = fix @@ fun expr ->
   let infixes = function
     | FACT ->    Infix.postfix (fun e -> Fact e)
     | POW ->     Infix.right 1 (fun e1 e2 -> Pow (e1, e2))
-    | TIMES ->   Infix.left  2 (fun e1 e2 -> Times (e1, e2))
+    | TIMES ->   Infix.both  2 (fun e1 e2 -> Times (e1, e2))
     | DIVIDE ->  Infix.left  2 (fun e1 e2 -> Divide (e1, e2))
-    | PLUS ->    Infix.left  3 (fun e1 e2 -> Plus (e1, e2))
+    | PLUS ->    Infix.both  3 (fun e1 e2 -> Plus (e1, e2))
     | MINUS ->   Infix.left  3 (fun e1 e2 -> Minus (e1, e2))
     | EQUALS ->  Infix.left  4 (fun e1 e2 -> Equals (e1, e2))
     | AND ->     Infix.right 5 (fun e1 e2 -> And (e1, e2))
@@ -56,3 +56,32 @@ let expr = fix @@ fun expr ->
     | _ ->       Infix.unknown
   in
   pratt_parser ~prefixes ~infixes ()
+
+let rec pretty_print ppf =
+  let p = Format.pp_print_string ppf in
+  let pp_prefix s e = p s; pretty_print ppf e in
+  let pp_infix e1 s e2 =
+    p "("; pretty_print ppf e1; p " "; p s; p " "; pretty_print ppf e2; p ")"
+  in
+  let pp_postfix e s = pretty_print ppf e; p s in
+  function
+  | Int_lit n -> Format.pp_print_int ppf n
+  | Neg e -> pp_prefix "-" e
+  | Plus (e1, e2) -> pp_infix e1 "+" e2
+  | Minus (e1, e2) -> pp_infix e1 "-" e2
+  | Times (e1, e2) -> pp_infix e1 "*" e2
+  | Divide (e1, e2) -> pp_infix e1 "/" e2
+  | Pow (e1, e2) -> pp_infix e1 "^" e2
+  | Fact e -> pp_postfix e "!"
+  | Bool_lit b -> Format.pp_print_bool ppf b
+  | Equals (e1, e2) -> pp_infix e1 "=" e2
+  | And (e1, e2) -> pp_infix e1 "&&" e2
+  | Or (e1, e2) -> pp_infix e1 "||" e2
+  | If (e1, e2, e_o) ->
+    pp_prefix "if " e1; pp_prefix " then " e2;
+    begin match e_o with
+      | None -> ()
+      | Some e3 -> pp_prefix " else " e3
+    end
+  | Let (x, e1, e2) -> p "let "; p x; pp_prefix " = " e1; pp_prefix " in " e2
+  | Var x -> p x
