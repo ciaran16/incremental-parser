@@ -1,11 +1,13 @@
+open Incr_lexing
+
 type ('tok, 'a) t
 
 type ('tok, 'a) parser
 
 module Parse_tree : sig
-  val create : ('tok, 'a) parser -> lexer:'tok Incr_lexing.Lexer.t -> ('tok, 'a) t
+  val create : ('tok, 'a) parser -> lexer:'tok Incr_lexer.t -> ('tok, 'a) t
 
-  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexing.Lexer.t ->
+  val update : start:int -> added:int -> removed:int -> lexer:'tok Incr_lexer.t ->
     ('tok, 'a) t -> ('tok, 'a) t
 
   val value : ('tok, 'a) t -> 'a

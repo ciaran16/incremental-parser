@@ -4,7 +4,7 @@ val token : 'tok -> 'tok lex_result
 
 val error : ?token:'tok -> string -> 'tok lex_result
 
-module Lexer : sig
+module Incr_lexer : sig
   type 'tok t
 
   val make : (int -> 'tok * int) -> 'tok t

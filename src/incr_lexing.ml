@@ -10,7 +10,7 @@ let error ?token msg =
   | None -> Error_msg msg
   | Some token -> Error_with_token (token, msg)
 
-module Lexer = struct
+module Incr_lexer = struct
   type 'tok t = {
     lex_at : int -> 'tok * int;
     pos : int;
