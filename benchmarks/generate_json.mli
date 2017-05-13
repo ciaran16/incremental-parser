@@ -17,8 +17,6 @@ val perfectly_balanced : ?list:list_type -> branch:int -> depth:int -> spec -> s
 
 val lock : spec -> spec
 
-val ast : spec -> Json_parser.json
-
 val tokens : spec -> Json_lexer.token array
 
 val raw : spec -> string

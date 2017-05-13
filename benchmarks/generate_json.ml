@@ -1,5 +1,5 @@
 open Json_lexer
-open Json_parser
+open Json_rd_parser
 
 type spec = unit -> json
 
@@ -26,9 +26,9 @@ let primitive () = match Random.int 10 with
   | 9 -> Bool_lit false
   | _ -> assert false
 
-let ocaml_list length ?(upto = length) f =
+let ocaml_list length ?(upto = length) spec =
   (* Use an array to stop stack overflows. *)
-  Array.init (random_int length upto) (fun _ -> f ()) |> Array.to_list
+  Array.init (random_int length upto) (fun _ -> spec ()) |> Array.to_list
 
 let array length ?upto spec () =
   Arr (ocaml_list length ?upto spec)
@@ -53,8 +53,6 @@ let perfectly_balanced ?list ~branch ~depth =
 let lock spec =
   let json = Lazy.from_fun spec in
   fun () -> Lazy.force json
-
-let ast spec = spec ()
 
 let tokens spec =
   let rec to_tokens acc json =
