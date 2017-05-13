@@ -29,4 +29,6 @@ module Incr_lexer : sig
   val skip : int -> 'tok t -> 'tok t
 
   val move_to : int -> 'tok t -> 'tok t
+
+  val verbose : bool ref
 end

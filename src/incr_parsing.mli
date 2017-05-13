@@ -75,9 +75,9 @@ module Combinators : sig
       that closes the list. It does not parse the opening token. This function should not be called
       during parsing. *)
 
-  type 'a tree =
-    | Leaf of 'a
-    | Branch of 'a tree * 'a tree
+  type 'a tree = [`Leaf of 'a | `Branch of 'a tree * 'a tree]
 
   val tree_of :  ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a tree option) parser
 end
+
+val print_reuse_info : bool ref

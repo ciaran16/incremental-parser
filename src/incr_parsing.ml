@@ -265,6 +265,8 @@ module Pratt = struct
       two ~l ~f ~r ~prec ~token_length ~height
 end
 
+let print_reuse_info = ref false
+
 module Reuse = struct
   type 'tok t = 'tok reuse_t = {
     min_pos : int; (* This minimum position from which nodes can start being reused. *)
@@ -342,7 +344,7 @@ module Reuse = struct
             begin match check_f node with
               | None -> None, {t with dyn_paths}
               | Some _ as some ->
-                Printf.printf "Reusing node at position %i." seek_pos;
+                if !print_reuse_info then Printf.printf "Reusing node at position %i.\n" seek_pos;
                 some, {t with dyn_paths = Dyn_path {path; tag}::tl}
             end
           | _ -> None, {t with dyn_paths}
@@ -350,7 +352,8 @@ module Reuse = struct
       | dyn_paths -> None, {t with dyn_paths}
 end
 
-(* NOTE: Currently the end token will always be explicitly lexed / read, which is annoying. *)
+(* NOTE: Currently the end token (or closing bracket etc) will always be explicitly lexed / read,
+   which isn't necessary. Need to somehow pass the end position to the parse_infix function. *)
 
 let rec parse_infix ~parse_prec left ({lookups={infixes; tag; _}; lexer; reuse} as state) =
   let o, reuse = reuse |> Reuse.satisfy_at (Incr_lexer.pos lexer) ~tag @@ fun node ->
@@ -367,6 +370,8 @@ let rec parse_infix ~parse_prec left ({lookups={infixes; tag; _}; lexer; reuse} 
       let right = Pratt.three_to_two ~m ~g ~r ~prec ~token_length_g ~height in
       Some (Pratt.balanced ~left ~f ~right ~prec ~token_length:token_length_f)
     | _ -> None
+    (* TODO If the node is an infix but its precedence is too low to parse yet, that means it will
+       be parsed higher up in the parser, so instead of lexing a token we should return. *)
   in
   match o with
   | Some node -> (* Reusing a node. *)
@@ -514,15 +519,11 @@ module Combinators = struct
     let empty_prefix = Prefix.custom (non_empty <* eat close) in
     pratt_parser ~prefixes ~empty_prefix ()
 
-  type 'a tree =
-    | Leaf of 'a
-    | Branch of 'a tree * 'a tree
-
-  let leaf v : 'a tree = Leaf v
-
-  let branch l r = Branch (l, r)
+  type 'a tree = [`Leaf of 'a | `Branch of 'a tree * 'a tree]
 
   let tree_of p ~sep ~close =
+    let leaf x = `Leaf x in
+    let branch l r = `Branch (l, r) in
     let non_empty : ('tok, 'a tree) parser =
       let empty_prefix = Prefix.custom (leaf <$> p) in
       let infixes token = if token = sep then Infix.both 1 branch else Infix.unknown in
@@ -542,8 +543,7 @@ type change_loc = {
 let rec update_parse : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'tok Reuse.t ->
   left_pos:int -> ('tok, a) parse_node -> ('tok, a) parse_node * 'tok Incr_lexer.t * 'tok Reuse.t =
   fun ({start_pos; added; removed} as change) ~lexer ~reuse ~left_pos -> function
-    | Satisfy {f; on_error; length; _} ->
-      assert (start_pos >= left_pos && start_pos <= left_pos + length);
+    | Satisfy {f; on_error; _} ->
       Combinators.satisfy f ?on_error ~lexer:(Incr_lexer.move_to left_pos lexer) ~reuse
     | Pratt_parse {lookups; pratt_node} ->
       let node, lexer, reuse = update_pratt change ~lexer ~reuse ~left_pos ~lookups pratt_node in
@@ -553,32 +553,19 @@ let rec update_parse : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'t
       Node.lift ~f node, lexer, reuse
     | App {left; right; _} ->
       let mid_pos = left_pos + Node.length left in
-      (* If the start position is past the mid position then only the right needs to be updated.
-         If the start position is equal to or before the mid position then the left needs to be
-         updated first and then possibly the right as well. The reason we also check if they're
-         equal is because of the longest match rule used lexing, which means the token to the
-         left could have changed, and also because errors can cause Satisfy nodes to have a
-         length of zero. *)
       if start_pos > mid_pos then (* Update right only. *)
         let right, lexer, reuse = right |> update_parse change ~lexer ~reuse ~left_pos:mid_pos in
         Node.app left right, lexer, reuse
-      else (* Update left first. *)
+      else (* Update left. *)
         let left, lexer, reuse = left |> update_parse change ~lexer ~reuse ~left_pos in
-        let left_pos = Incr_lexer.pos lexer in
-        (* We now need to calculate the lengths that still need to be added to and removed from
-           the right sub-node. The remaining length to be added to the right = the original
-           length to be added - the length added to the left (new position - start position). *)
-        let added = max 0 (added - (left_pos - start_pos)) in
-        (* The remaining length to be removed from the right = the original length to be removed
-           - the length removed from the left. The reason the length removed from the left is
-           mid_pos - start is because that is the length from the start position to the mid
-           position, which all must have been removed and replaced when the left was updated. *)
-        let removed = max 0 (removed - (mid_pos - start_pos)) in
-        if added = 0 && removed = 0 then (* Only left needed to be updated. *)
+        let mid_pos = left_pos + Node.length left in
+        if mid_pos + added - removed = mid_pos && mid_pos > start_pos + added then
+          (* The right node can be reused. It's position is the same once offset by
+             added - removed and it is clear of all the new input (start_pos + added).
+             This is a similar technique to the one used for reusing pratt nodes. *)
           Node.app left right, lexer, reuse
-        else (* Update right as well. *)
-          let new_change = {start_pos = left_pos; added; removed} in
-          let right, lexer, reuse = right |> update_parse new_change ~lexer ~reuse ~left_pos in
+        else (* The right must be updated as well. *)
+          let right, lexer, reuse = right |> update_parse change ~lexer ~reuse ~left_pos:mid_pos in
           Node.app left right, lexer, reuse
 
 and update_pratt : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'tok Reuse.t ->
@@ -621,7 +608,7 @@ and update_pratt : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'tok R
           r |> go_right ~parse_prec:prec (Pratt.balanced ~prec ~left:l ~f ~token_length)
         | Three_infix {l; f; m; g; r; prec; token_length_f; token_length_g; height; _} ->
           let two_infix = Pratt.three_to_two ~m ~g ~r ~prec ~token_length_g ~height in
-          let make ~right = Pratt.balanced ~prec ~left:l ~f ~right ~token_length:token_length_f in
+          let make = Pratt.balanced ~prec ~left:l ~f ~token_length:token_length_f in
           two_infix |> go_right ~parse_prec:prec make
         | Combinators {parse_node; token_length; _} ->
           (* Start incrementally parsing after the token. *)

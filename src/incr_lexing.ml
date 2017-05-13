@@ -63,7 +63,10 @@ module Incr_lexer = struct
 
   let pos {pos; _} = pos
 
+  let verbose = ref false
+
   let next {lex_at; pos; next = lazy (token, len)} =
+    if !verbose then Printf.printf "Lexing at position %i.\n" pos;
     token, len, make_at (pos + len) lex_at
 
   let peek {next = lazy (token, _); _} = token
