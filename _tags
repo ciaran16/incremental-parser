@@ -2,6 +2,8 @@ true : warn(+a-4-42-48), bin_annot, safe_string
 
 <src> : include
 
+<examples> : include
+
 <test> : include
 <test/*> : package(alcotest)
 

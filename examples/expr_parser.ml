@@ -28,10 +28,9 @@ let expr = fix @@ fun expr ->
     let parse_else = pratt_parser ~prefixes ~empty_prefix:(Prefix.return None) () in
     (fun e1 e2 e_o -> If (e1, e2, e_o)) <$> expr <*> eat THEN *> expr <*> parse_else
   in
-  let parse_let =
-    let ident = satisfy (function IDENT x -> Some x | _ -> None) in
-    (fun x e1 e2 -> Let (x, e1, e2)) <$> ident <*> eat EQUALS *> expr <*> eat IN *> expr
-  in
+  let ident = satisfy (function IDENT x -> Some x | _ -> None) in
+  let _Let x e1 e2 = Let (x, e1, e2) in
+  let parse_let = _Let <$> ident <*> eat EQUALS *> expr <*> eat IN *> expr in
   let prefixes = function
     | INT n ->   Prefix.return (Int_lit n)
     | BOOL b ->  Prefix.return (Bool_lit b)
@@ -50,9 +49,9 @@ let expr = fix @@ fun expr ->
     | DIVIDE ->  Infix.left  2 (fun e1 e2 -> Divide (e1, e2))
     | PLUS ->    Infix.both  3 (fun e1 e2 -> Plus (e1, e2))
     | MINUS ->   Infix.left  3 (fun e1 e2 -> Minus (e1, e2))
-    | EQUALS ->  Infix.left  4 (fun e1 e2 -> Equals (e1, e2))
-    | AND ->     Infix.right 5 (fun e1 e2 -> And (e1, e2))
-    | OR ->      Infix.right 6 (fun e1 e2 -> Or (e1, e2))
+    | EQUALS ->  Infix.both  4 (fun e1 e2 -> Equals (e1, e2))
+    | AND ->     Infix.both  5 (fun e1 e2 -> And (e1, e2))
+    | OR ->      Infix.both  6 (fun e1 e2 -> Or (e1, e2))
     | _ ->       Infix.unknown
   in
   pratt_parser ~prefixes ~infixes ()
