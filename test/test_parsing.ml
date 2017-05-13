@@ -14,7 +14,6 @@ module Non_incremental_parsing = struct
     "Empty prefix length 1", `Quick, check_length "if true then 2";
     "Empty prefix length 2", `Quick, check_length "(if true then 2) + 4";
     "Lexing errors length", `Quick, check_length "2 # + . 2 = \n@ 4";
-    "Parsing unknown infix length", `Quick, check_length "2 + 2) = 4";
   ]
 end
 
@@ -28,9 +27,11 @@ module Incremental_parsing = struct
     let parse_tree = Parse_tree.create Expr_parser.expr ~lexer:first_lexer in
     let second_lexer = expr_lexer_from_string second in
     let e1 = Parse_tree.create Expr_parser.expr ~lexer:second_lexer in
+    Incr_lexer.verbose := true; print_reuse_info := true;
     let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer:second_lexer in
-    Alcotest.(check int "lengths equal" (Parse_tree.length e1) (Parse_tree.length e2));
-    check_expr "parses equal" (Parse_tree.value e1) (Parse_tree.value e2)
+    Incr_lexer.verbose := false; print_reuse_info := false;
+    check_expr "parses equal" (Parse_tree.value e1) (Parse_tree.value e2);
+    Alcotest.(check int "lengths equal" (Parse_tree.length e1) (Parse_tree.length e2))
 
   let update () = compare
       "3 * (4 + 5 * 6!) - -3"
@@ -67,6 +68,11 @@ module Incremental_parsing = struct
       "1 - 4 + 2 + 3"
       ~start:1 ~added:4 ~removed:0
 
+  let update_double_if () = compare
+      "if x then if y then 1 else 2"
+      "if x then 1 else 2"
+      ~start:9 ~added:0 ~removed:10
+
   let tests = [
     "Incremental update", `Quick, update;
     "Token update", `Quick, update_token;
@@ -75,6 +81,7 @@ module Incremental_parsing = struct
     "Update nested", `Quick, update_nested;
     "Update right associative infixes", `Quick, update_right_assoc_infixes;
     "Update left associative infixes", `Quick, update_left_assoc_infixes;
+    "Update double if", `Quick, update_double_if;
   ]
 end
 
