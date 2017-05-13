@@ -50,6 +50,17 @@ module Incr_lexer = struct
       last_pos_ref := pos + length;
       lex_result, length
 
+  let of_ocamllex_and_string lex s =
+    let pos_ref = ref 0 in
+    let lexing_function b n =
+      let len = min n (String.length s - !pos_ref) in
+      Bytes.blit_string s !pos_ref b 0 len;
+      pos_ref := !pos_ref + len;
+      len
+    in
+    let make_lexbuf_at pos = pos_ref := pos; Lexing.from_function lexing_function in
+    of_ocamllex lex ~make_lexbuf_at
+
   let pos {pos; _} = pos
 
   let next {lex_at; pos; next = lazy (token, len)} =

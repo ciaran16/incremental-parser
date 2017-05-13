@@ -17,6 +17,8 @@ module Incr_lexer : sig
 
   val of_ocamllex : (Lexing.lexbuf -> 'tok) -> make_lexbuf_at:(int -> Lexing.lexbuf) -> 'tok t
 
+  val of_ocamllex_and_string : (Lexing.lexbuf -> 'tok) -> string -> 'tok t
+
   val pos : 'tok t -> int
 
   val next : 'tok t -> 'tok * int * 'tok t

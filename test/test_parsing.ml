@@ -2,8 +2,7 @@ open Incr_lexing
 open Incr_parsing
 
 let expr_lexer_from_string s =
-  let make_lexbuf_at pos = Lexing.from_string (String.sub s pos (String.length s - pos)) in
-  Incr_lexer.(handle_errors @@ of_ocamllex Expr_lexer.lex ~make_lexbuf_at)
+  Incr_lexer.(handle_errors @@ of_ocamllex_and_string Expr_lexer.lex s)
 
 module Non_incremental_parsing = struct
   let check_length s () =
@@ -15,7 +14,7 @@ module Non_incremental_parsing = struct
     "Empty prefix length 1", `Quick, check_length "if true then 2";
     "Empty prefix length 2", `Quick, check_length "(if true then 2) + 4";
     "Lexing errors length", `Quick, check_length "2 # + . 2 = \n@ 4";
-    "Parsing unknown infix length", `Quick, check_length "2 + 2) = 4"
+    "Parsing unknown infix length", `Quick, check_length "2 + 2) = 4";
   ]
 end
 
@@ -25,10 +24,11 @@ module Incremental_parsing = struct
   let check_expr = Alcotest.check expr_testable
 
   let compare first second ~start ~added ~removed =
-    let parse_tree = Parse_tree.create Expr_parser.expr ~lexer:(expr_lexer_from_string first) in
-    let lexer = expr_lexer_from_string second in
-    let e1 = Parse_tree.create Expr_parser.expr ~lexer in
-    let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer in
+    let first_lexer = expr_lexer_from_string first in
+    let parse_tree = Parse_tree.create Expr_parser.expr ~lexer:first_lexer in
+    let second_lexer = expr_lexer_from_string second in
+    let e1 = Parse_tree.create Expr_parser.expr ~lexer:second_lexer in
+    let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer:second_lexer in
     Alcotest.(check int "lengths equal" (Parse_tree.length e1) (Parse_tree.length e2));
     check_expr "parses equal" (Parse_tree.value e1) (Parse_tree.value e2)
 
