@@ -1,11 +1,11 @@
 type 'a t
 
-type (_, _) equal =
-  | Equal : ('a, 'a) equal
-  | Not_equal : ('a, 'b) equal
+type (_, _) maybe_equal =
+  | Equal : ('a, 'a) maybe_equal
+  | Not_equal : ('a, 'b) maybe_equal
 
-val fresh : unit -> 'a t
+val create : unit -> 'a t
 
-val compare : 'a t -> 'b t -> ('a, 'b) equal
+val compare : 'a t -> 'b t -> ('a, 'b) maybe_equal
 
 val tag_count : unit -> int

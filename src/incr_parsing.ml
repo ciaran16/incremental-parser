@@ -461,7 +461,7 @@ module Prefix = struct
 end
 
 let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.unknown)
-    ?(infixes = fun _ -> Infix.unknown) ?(tag = Type_tag.fresh ()) () =
+    ?(infixes = fun _ -> Infix.unknown) ?(tag = Type_tag.create ()) () =
   let lookups = {prefixes; empty_prefix; infixes; tag} in
   fun ~lexer ~reuse ->
     let state = {lookups; lexer; reuse} in
