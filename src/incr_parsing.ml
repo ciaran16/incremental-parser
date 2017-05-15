@@ -115,7 +115,11 @@ and ('tok, 'a) prefix =
   | Known of ('tok, 'a) state_f
   | Unknown
 
-and ('tok, 'a) infix = int * (left:('tok, 'a) pratt_node -> ('tok, 'a) state_f)
+and ('tok, 'a) infix_without_prec =
+  | Normal of (left:('tok, 'a) pratt_node -> ('tok, 'a) state_f)
+  | Balancing of ('a -> 'a -> 'a)
+
+and ('tok, 'a) infix = int * ('tok, 'a) infix_without_prec
 
 type ('tok, 'a) parser = lexer:'tok Incr_lexer.t -> reuse:'tok reuse_t ->
   ('tok, 'a) parse_node * 'tok Incr_lexer.t * 'tok reuse_t
@@ -261,11 +265,39 @@ module Pratt = struct
     | Up (l, f, r, token_length) ->
       let height = 1 + max l_height r_height in (* Height must have increased by 1. *)
       two ~l ~f ~r ~prec ~token_length ~height
+
+  let concat_leaves ~left nodes ~prec =
+    let rec concat_same_height nodes ~height =
+      let height = height + 1 in
+      let rec reduce nodes acc =
+        match nodes with
+        | [] -> List.rev acc
+        | [_] -> assert false
+        | [(h, token_length_h, l); (f, token_length_f, m); (g, token_length_g, r)] ->
+          let three_infix = three ~l ~f ~m ~g ~r ~prec ~token_length_f ~token_length_g ~height in
+          List.rev ((h, token_length_h, three_infix) :: acc)
+        | (h, token_length_h, l)::(f, token_length, r)::nodes ->
+          let two_infix = two ~l ~f ~r ~prec ~token_length ~height in
+          reduce nodes ((h, token_length_h, two_infix) :: acc)
+      in
+      match nodes with
+      | [] -> assert false
+      | [node] -> node
+      | nodes -> reduce nodes [] |> concat_same_height ~height
+    in
+    let f, token_length, right = concat_same_height nodes ~height:0 in
+    balanced ~left ~f ~right ~prec ~token_length
 end
 
-let print_reuse_info = ref false
+module Reuse : sig
+  type 'tok t = 'tok reuse_t
 
-module Reuse = struct
+  val empty : 'tok t
+
+  val create : ('tok, 'a) parse_node -> start_pos:int -> added:int -> removed:int -> 'tok t
+
+  val check_at : int -> tag:'a Type_tag.t -> 'tok t -> ('tok, 'a) pratt_node option * 'tok t
+end = struct
   type 'tok t = 'tok reuse_t = {
     min_pos : int; (* This minimum position from which nodes can start being reused. *)
     dyn_paths : 'tok dyn_path list;
@@ -330,115 +362,115 @@ module Reuse = struct
     let dyn_paths = parse_tree |> extract_pratt_nodes ~left_pos:(added - removed) in
     {min_pos = start_pos + added; dyn_paths}
 
-  let satisfy_at (type a) seek_pos ~(tag : a Type_tag.t)
-      (check_f : ('tok, a) pratt_node -> ('tok, a) pratt_node option) ({min_pos; dyn_paths} as t) :
+  let check_at (type a) seek_pos ~(tag : a Type_tag.t) ({min_pos; dyn_paths} as t) :
     ('tok, a) pratt_node option * 'tok t =
     if seek_pos < min_pos then None, t
     else
-      match dyn_paths |> seek_node ~seek_pos with
-      | Dyn_path {path=(node, left_pos)::path; tag=tag'}::tl as dyn_paths ->
-        begin match Type_tag.compare tag tag' with
-          | Type_tag.Equal when Pratt.token_start_pos node ~left_pos = seek_pos ->
-            begin match check_f node with
-              | None -> None, {t with dyn_paths}
-              | Some _ as some ->
-                if !print_reuse_info then Printf.printf "Reusing node at position %i.\n" seek_pos;
-                some, {t with dyn_paths = Dyn_path {path; tag}::tl}
-            end
-          | _ -> None, {t with dyn_paths}
-        end
-      | dyn_paths -> None, {t with dyn_paths}
+      let dyn_paths = dyn_paths |> seek_node ~seek_pos in
+      let t = {t with dyn_paths} in
+      match dyn_paths with
+      | [] | Dyn_path {path=[]; _}::_ -> None, t
+      | Dyn_path {path=(node, left_pos)::_; tag=tag'}::_ ->
+        if Pratt.token_start_pos node ~left_pos <> seek_pos then None, t
+        else match Type_tag.compare tag tag' with
+          | Type_tag.Not_equal -> None, t
+          | Type_tag.Equal -> Some node, t
 end
+
+let print_reuse_info = ref false
+
+let log_reuse s ~lexer =
+  if !print_reuse_info then Printf.printf "Reusing %s at position %i.\n" s (Incr_lexer.pos lexer)
 
 (* NOTE: Currently the end token (or closing bracket etc) will always be explicitly lexed / read,
    which isn't necessary. Need to somehow pass the end position to the parse_infix function. *)
 
 let rec parse_infix ~parse_prec left ({lookups={infixes; tag; _}; lexer; reuse} as state) =
-  let o, reuse = reuse |> Reuse.satisfy_at (Incr_lexer.pos lexer) ~tag @@ fun node ->
-    let token_length = Pratt.token_length node in
-    match node with
-    | Infix {prec; parse_prec=orig_pp; f; right; _} when prec < parse_prec ->
-      Some (Pratt.infix ~prec ~parse_prec:orig_pp ~left ~f ~right ~token_length)
-    | Postfix {prec; f; _} when prec < parse_prec ->
-      Some (Pratt.postfix ~prec ~left ~f ~token_length)
-    | Two_infix {prec; f; r; _} when prec < parse_prec ->
-      Some (Pratt.balanced ~left ~f ~right:r ~prec ~token_length)
-    | Three_infix {f; m; g; r; prec; token_length_f; token_length_g; height; _}
-      when prec < parse_prec ->
-      let right = Pratt.three_to_two ~m ~g ~r ~prec ~token_length_g ~height in
-      Some (Pratt.balanced ~left ~f ~right ~prec ~token_length:token_length_f)
-    | _ -> None
-    (* TODO If the node is an infix but its precedence is too low to parse yet, that means it will
-       be parsed higher up in the parser, so instead of lexing a token we should return. *)
-  in
-  match o with
-  | Some node -> (* Reusing a node. *)
+  let maybe_node, reuse = reuse |> Reuse.check_at (Incr_lexer.pos lexer) ~tag in
+  let state = {state with reuse} in
+  let reuse_and_continue node =
+    log_reuse "infix" ~lexer;
     let lexer = lexer |> Incr_lexer.skip (Pratt.length node - Pratt.length left) in
-    {state with lexer; reuse} |> parse_infix ~parse_prec node
-  | None -> (* Parsing a node. *)
+    {state with lexer} |> parse_infix ~parse_prec node
+  in
+  match maybe_node with
+  | Some (Infix {prec; _} | Postfix {prec; _} | Two_infix {prec; _} | Three_infix {prec; _})
+    when prec >= parse_prec ->
+    left, {state with reuse} (* The next node cannot be parsed so simply return. *)
+  | Some (Infix {prec; parse_prec=orig_pp; f; right; token_length; _}) ->
+    Pratt.infix ~prec ~parse_prec:orig_pp ~left ~f ~right ~token_length |> reuse_and_continue
+  | Some (Postfix {prec; f; token_length; _}) ->
+    Pratt.postfix ~prec ~left ~f ~token_length |> reuse_and_continue
+  | Some (Two_infix {prec; f; r; token_length; _}) ->
+    Pratt.balanced ~left ~f ~right:r ~prec ~token_length |> reuse_and_continue
+  | Some (Three_infix {f; m; g; r; prec; token_length_f; token_length_g; height; _}) ->
+    let right = Pratt.three_to_two ~m ~g ~r ~prec ~token_length_g ~height in
+    Pratt.balanced ~left ~f ~right ~prec ~token_length:token_length_f |> reuse_and_continue
+  | None | Some (Leaf _ | Prefix _ | Combinators _) -> (* Parsing a node. *)
     let token, token_length, lexer = lexer |> Incr_lexer.next in
-    let next_prec, infix = infixes token in
-    if next_prec >= parse_prec then
-      (* The next operator has the same or lower precedence so can't be parsed at this level of the
-         parse tree. It will be parsed higher up in the tree (unless it is Infix.unknown). *)
-      left, state
+    let prec, infix = infixes token in
+    if prec >= parse_prec then left, state
     else
-      let state = {state with lexer; reuse} in (* Advance the state, moving past the token. *)
-      let node, state = state |> infix ~left ~token_length in
+      let state = {state with lexer} in (* Advance the state, moving past the token. *)
+      let node, state = match infix with
+        | Normal infix -> state |> infix ~left ~token_length
+        | Balancing f ->
+          let right, state = state |> parse_prefix ~parse_prec:prec in
+          state |> parse_balanced ~left ~prec [(f, token_length, right)]
+      in
       state |> parse_infix ~parse_prec node
 
-let parse_prefix ~parse_prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; reuse} as state) =
-  let o, reuse = reuse |> Reuse.satisfy_at (Incr_lexer.pos lexer) ~tag @@ function
-    | Leaf _ | Prefix _ | Combinators _ as node -> Some node
-    | _ -> None
-  in
-  let node, state = match o with
-    | Some node ->
+and parse_balanced ~left ~prec acc ({lookups={infixes; tag; _}; lexer; reuse} as state) =
+  match reuse |> Reuse.check_at (Incr_lexer.pos lexer) ~tag with
+  | Some _, reuse -> Pratt.concat_leaves ~left (List.rev acc) ~prec, {state with reuse}
+  | None, reuse ->
+    let token, token_length, lexer = lexer |> Incr_lexer.next in
+    match infixes token with
+    | prec', Balancing f when prec = prec' ->
+      let state = {state with lexer; reuse} in
+      let right, state = state |> parse_prefix ~parse_prec:prec in
+      state |> parse_balanced ~left ~prec ((f, token_length, right) :: acc)
+    | _ -> Pratt.concat_leaves ~left (List.rev acc) ~prec, {state with reuse}
+
+and parse_prefix ~parse_prec ({lookups={prefixes; empty_prefix; tag; _}; lexer; reuse} as state) =
+  let maybe_node, reuse = reuse |> Reuse.check_at (Incr_lexer.pos lexer) ~tag in
+  let state = {state with reuse} in
+  let node, state = match maybe_node with
+    | Some (Leaf _ | Prefix _ | Combinators _ as node) ->
+      log_reuse "prefix" ~lexer;
       let lexer = lexer |> Incr_lexer.skip (Pratt.length node) in
-      node, {state with lexer; reuse}
-    | None ->
+      node, {state with lexer}
+    | None | Some (Infix _ | Postfix _ | Two_infix _ | Three_infix _) ->
       let token, token_length, lexer = lexer |> Incr_lexer.next in
       match prefixes token with
-      | Known prefix -> (* Known prefix operator. *)
-        let state = {state with lexer} in (* Advance the state, moving past the token. *)
-        state |> prefix ~token_length
-      | Unknown -> (* Unknown prefix operator, try to use the empty prefix. *)
+      | Known prefix -> {state with lexer} |> prefix ~token_length (* Advance the state. *)
+      | Unknown ->
         match empty_prefix with
-        | Known empty_prefix ->
-          (* The state isn't advanced here as the token hasn't been used. *)
-          state |> empty_prefix ~token_length:0
+        | Known empty_prefix -> state |> empty_prefix ~token_length:0
         | Unknown ->
           failwith (Printf.sprintf "Unknown prefix at position %i." (Incr_lexer.pos state.lexer))
   in
   state |> parse_infix ~parse_prec node
 
 module Infix = struct
-  let left prec f =
-    prec,
-    fun ~left ~token_length state ->
-      let right, state = state |> parse_prefix ~parse_prec:prec in
-      Pratt.infix ~left ~f ~right ~prec ~parse_prec:prec ~token_length, state
+  let infix ~prec f = prec, Normal f
 
-  let right prec f =
-    prec,
-    fun ~left ~token_length state ->
-      (* Using prec + 1 makes the parse tree right associative. *)
-      let right, state = state |> parse_prefix ~parse_prec:(prec + 1) in
-      Pratt.infix ~left ~f ~right ~prec ~parse_prec:(prec + 1) ~token_length, state
+  let left prec f = infix ~prec @@ fun ~left ~token_length state ->
+    let right, state = state |> parse_prefix ~parse_prec:prec in
+    Pratt.infix ~left ~f ~right ~prec ~parse_prec:prec ~token_length, state
 
-  let both prec f =
-    prec,
-    fun ~left ~token_length state ->
-      (* Parse as left associative to stop stack overflows. *)
-      let right, state = state |> parse_prefix ~parse_prec:prec in
-      Pratt.balanced ~left ~f ~right ~prec ~token_length, state
+  let right prec f = infix ~prec @@ fun ~left ~token_length state ->
+    (* Using prec + 1 makes the parse tree right associative. *)
+    let right, state = state |> parse_prefix ~parse_prec:(prec + 1) in
+    Pratt.infix ~left ~f ~right ~prec ~parse_prec:(prec + 1) ~token_length, state
 
-  let postfix ?(prec = -2) f =
-    prec,
-    fun ~left ~token_length state -> Pratt.postfix ~left ~f ~prec ~token_length, state
+  let postfix ?(prec = -2) f = infix ~prec @@ fun ~left ~token_length state ->
+    Pratt.postfix ~left ~f ~prec ~token_length, state
 
   (* This can't be parsed by the pratt parser as it has the lowest possible precedence. *)
-  let unknown = max_int, fun ~left:_ ~token_length:_ _state -> assert false
+  let unknown = max_int, Normal (fun ~left:_ ~token_length:_ _state -> assert false)
+
+  let both prec f = prec, Balancing f
 end
 
 module Prefix = struct
