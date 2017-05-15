@@ -2,7 +2,6 @@ open Core_bench.Std.Bench
 
 let run_tests name init_tests =
   let run_config = Run_config.create ()
-      ~verbosity:`High
       ~time_quota:(Core.Span.of_sec 1.0)
   in
   let display_config = Display_config.create ()
@@ -23,13 +22,31 @@ let read_data name =
     let n = Unix.read fd bytes pos remaining in
     if n = 0 then () else loop (pos + n) (remaining - n)
   in
-  loop 0 length; Bytes.to_string bytes
+  loop 0 length; Unix.close fd; Bytes.to_string bytes
 
-let with_time f =
+let write_results name ~headings ~to_string rows =
+  print_endline ("Writing to file " ^ name);
+  let file = "benchmarks/results/" ^ name in
+  let fd = Unix.(openfile file [O_WRONLY; O_CREAT; O_TRUNC] 0o644) in
+  let buf = Buffer.create 16 in
+  Buffer.add_string buf (String.concat " " headings); Buffer.add_char buf '\n';
+  Array.iter (fun row -> Buffer.add_string buf (to_string row); Buffer.add_char buf '\n') rows;
+  Unix.write fd (Buffer.to_bytes buf) 0 (Buffer.length buf) |> ignore
+
+let print_time f =
   let time1 = Unix.gettimeofday () in
   let v = f () in
   let time2 = Unix.gettimeofday () in
   Printf.printf "Time taken: %fs" (time2 -. time1); print_newline (); v
+
+let measure_time n f =
+  Gc.compact ();
+  let time1 = Unix.gettimeofday () in
+  for _ = 1 to n do
+    ignore (Sys.opaque_identity (f ()))
+  done;
+  let time2 = Unix.gettimeofday () in
+  (time2 -. time1) /. float_of_int n
 
 let rec equals_yojson (json : Json_parser.json) (yojson : Yojson.Basic.json) =
   let open Json_parser in
