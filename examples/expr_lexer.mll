@@ -1,6 +1,4 @@
 {
-open Incr_lexing
-
 type token =
   | END
   | INT of int
@@ -19,25 +17,25 @@ let identifier = ident_first (ident_first | digit)*
 
 rule lex = parse
   | ' ' | '\t' | '\n' | '\r' { lex lexbuf }
-  | digit+ as int_string { token @@ INT (int_of_string int_string) }
-  | '+' { token PLUS }
-  | '-' { token MINUS }
-  | '*' { token TIMES }
-  | '/' { token DIVIDE }
-  | '^' { token POW }
-  | '!' { token FACT }
-  | "true" { token (BOOL true) }
-  | "false" { token (BOOL false) }
-  | '=' { token EQUALS }
-  | "&&" { token AND }
-  | "||" { token OR }
-  | '(' { token PAREN_L }
-  | ')' { token PAREN_R }
-  | "if" { token IF }
-  | "then" { token THEN }
-  | "else" { token ELSE }
-  | "let" { token LET }
-  | "in" { token IN }
-  | identifier as s { token (IDENT s) }
-  | eof { token END }
-  | _ { error ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }
+  | digit+ as int_string { INT (int_of_string int_string) }
+  | '+' { PLUS }
+  | '-' { MINUS }
+  | '*' { TIMES }
+  | '/' { DIVIDE }
+  | '^' { POW }
+  | '!' { FACT }
+  | "true" { BOOL true }
+  | "false" { BOOL false }
+  | '=' { EQUALS }
+  | "&&" { AND }
+  | "||" { OR }
+  | '(' { PAREN_L }
+  | ')' { PAREN_R }
+  | "if" { IF }
+  | "then" { THEN }
+  | "else" { ELSE }
+  | "let" { LET }
+  | "in" { IN }
+  | identifier as s { IDENT s }
+  | eof { END }
+  | _ { failwith ("Unknown character '" ^ Lexing.lexeme lexbuf ^ "'.") }

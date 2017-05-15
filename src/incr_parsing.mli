@@ -1,5 +1,3 @@
-open Incr_lexing
-
 type ('tok, 'a) parser
 
 module Parse_tree : sig

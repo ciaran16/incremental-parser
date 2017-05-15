@@ -1,6 +1,5 @@
 open Benchmarking
 open Core_bench.Std.Bench
-open Incr_lexing
 open Incr_parsing
 
 let () = run_tests "Non-incremental / initial parse" @@ fun () ->

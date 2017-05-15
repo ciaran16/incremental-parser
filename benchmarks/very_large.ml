@@ -1,10 +1,10 @@
 open Benchmarking
-open Incr_lexing
 open Incr_parsing
 
-let huge_incremental () =
+let () =
   (* These don't work well when run through Core_bench as it always tries to stabilise the garbage
      collector on first run, even with stabilize_gc_between_runs set to false. *)
+  print_endline "Parsing large file...";
   let raw_json = read_data "citylots.json" in
   let pos_ref = ref 0 in
   let lexing_function b n =
@@ -29,5 +29,6 @@ let huge_incremental () =
     let lexer = Incr_lexer.move_to 0 lexer in
     Parse_tree.update pt' ~start ~added:1000 ~removed:1000 ~lexer
   in
-  assert Parse_tree.(value pt = value pt' && length pt = length pt');
-  assert (equals_yojson (Parse_tree.value pt') (Yojson.Basic.from_string raw_json))
+  let yojson = with_time (fun () -> Yojson.Basic.from_string raw_json) in
+  assert (equals_yojson (Parse_tree.value pt) yojson);
+  assert (equals_yojson (Parse_tree.value pt') yojson)

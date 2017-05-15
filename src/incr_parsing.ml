@@ -1,5 +1,3 @@
-open Incr_lexing
-
 type ('tok, _) parse_node =
   | Satisfy : {
       f : 'tok -> 'a option;

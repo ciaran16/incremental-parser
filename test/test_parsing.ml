@@ -1,19 +1,14 @@
-open Incr_lexing
 open Incr_parsing
-
-let expr_lexer_from_string s =
-  Incr_lexer.(handle_errors @@ of_ocamllex_and_string Expr_lexer.lex s)
 
 module Non_incremental_parsing = struct
   let check_length s () =
-    let lexer = expr_lexer_from_string s in
+    let lexer = Incr_lexer.of_ocamllex_and_string Expr_lexer.lex s in
     let parse_tree = Parse_tree.create Expr_parser.expr ~lexer in
     Alcotest.(check int) "same length" (String.length s) (Parse_tree.length parse_tree)
 
   let tests = [
     "Empty prefix length 1", `Quick, check_length "if true then 2";
     "Empty prefix length 2", `Quick, check_length "(if true then 2) + 4";
-    "Lexing errors length", `Quick, check_length "2 # + . 2 = \n@ 4";
   ]
 end
 
@@ -23,9 +18,9 @@ module Incremental_parsing = struct
   let check_expr = Alcotest.check expr_testable
 
   let compare first second ~start ~added ~removed =
-    let first_lexer = expr_lexer_from_string first in
+    let first_lexer = Incr_lexer.of_ocamllex_and_string Expr_lexer.lex first in
     let parse_tree = Parse_tree.create Expr_parser.expr ~lexer:first_lexer in
-    let second_lexer = expr_lexer_from_string second in
+    let second_lexer = Incr_lexer.of_ocamllex_and_string Expr_lexer.lex second in
     let e1 = Parse_tree.create Expr_parser.expr ~lexer:second_lexer in
     Incr_lexer.verbose := true; print_reuse_info := true;
     let e2 = parse_tree |> Parse_tree.update ~start ~added ~removed ~lexer:second_lexer in
