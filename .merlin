@@ -1,6 +1,9 @@
 FLG -w +a-4-34-37-42-48
 
-S src examples test benchmarks
+S src
+S examples
+S test
+S benchmarks
 
 B _build/**
 

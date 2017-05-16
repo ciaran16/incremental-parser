@@ -491,7 +491,7 @@ module Prefix = struct
 end
 
 let pratt_parser ?(prefixes = fun _ -> Prefix.unknown) ?(empty_prefix = Prefix.unknown)
-    ?(infixes = fun _ -> Infix.unknown) ?(tag = Type_tag.create ()) () =
+    ?(infixes = fun _ -> Infix.unknown) ?(tag = Type_tag.fresh ()) () =
   let lookups = {prefixes; empty_prefix; infixes; tag} in
   fun ~lexer ~reuse ->
     let state = {lookups; lexer; reuse} in
@@ -506,7 +506,7 @@ module Combinators = struct
     | None ->
       match on_error with
       | Some v ->
-        Printf.printf "Using error value for satisfy at position %i." (Incr_lexer.pos lexer);
+        Printf.printf "Using error value for satisfy at position %i.\n%!" (Incr_lexer.pos lexer);
         Node.satisfy ~f ~on_error v ~length, lexer, reuse (* Do not advance the lexer. *)
       | None -> failwith @@ Printf.sprintf "Satisfy failed at position %i." (Incr_lexer.pos lexer)
 
