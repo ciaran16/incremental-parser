@@ -68,6 +68,8 @@ module Combinators : sig
 
   val fix : (('tok, 'a) parser -> ('tok, 'a) parser) -> ('tok, 'a) parser
 
+  val non_empty_list_of : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a list) parser
+
   val list_of : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a list) parser
   (** [list_of p ~sep ~close] parses the list separated by the token [sep] and also parses the token
       that closes the list. It does not parse the opening token. This function should not be called
@@ -75,7 +77,13 @@ module Combinators : sig
 
   type 'a tree = [`Leaf of 'a | `Branch of 'a tree * 'a tree]
 
-  val tree_of :  ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a tree option) parser
+  val non_empty_tree_of : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a tree) parser
+
+  val tree_of : ('tok, 'a) parser -> sep:'tok -> close:'tok -> ('tok, 'a tree option) parser
+  (** [tree_of p ~sep ~close] parses the list separated by the token [sep] and also parses the token
+      that closes the list, then turns it into a balanced binary tree. If the list is empty then
+      [None] is returned. It does not parse the opening token. This function should not be called
+      during parsing. *)
 end
 
 val print_reuse_info : bool ref

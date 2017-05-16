@@ -538,29 +538,28 @@ module Combinators = struct
     and p ~lexer ~reuse = Lazy.force fixed ~lexer ~reuse in
     Lazy.force fixed
 
+  let non_empty_list_of p ~sep ~close =
+    let rev_app_one tl = function [hd] -> hd::tl | _ -> assert false in
+    let empty_prefix = Prefix.custom (p >>| fun x -> [x]) in
+    let infixes token = if token = sep then Infix.left 1 rev_app_one else Infix.unknown in
+    List.rev <$> pratt_parser ~empty_prefix ~infixes () <* eat close
+
   let list_of p ~sep ~close =
-    let non_empty =
-      let rev_app_one tl = function [hd] -> hd::tl | _ -> assert false in
-      let empty_prefix = Prefix.custom (p >>| fun x -> [x]) in
-      let infixes token = if token = sep then Infix.left 1 rev_app_one else Infix.unknown in
-      List.rev <$> pratt_parser ~empty_prefix ~infixes ()
-    in
     let prefixes token = if token = close then Prefix.return [] else Prefix.unknown in
-    let empty_prefix = Prefix.custom (non_empty <* eat close) in
+    let empty_prefix = Prefix.custom (non_empty_list_of p ~sep ~close) in
     pratt_parser ~prefixes ~empty_prefix ()
 
   type 'a tree = [`Leaf of 'a | `Branch of 'a tree * 'a tree]
 
-  let tree_of p ~sep ~close =
-    let leaf x = `Leaf x in
+  let non_empty_tree_of p ~sep ~close =
     let branch l r = `Branch (l, r) in
-    let non_empty : ('tok, 'a tree) parser =
-      let empty_prefix = Prefix.custom (leaf <$> p) in
-      let infixes token = if token = sep then Infix.both 1 branch else Infix.unknown in
-      pratt_parser ~empty_prefix ~infixes ()
-    in
+    let empty_prefix = Prefix.custom (p >>| fun x -> `Leaf x) in
+    let infixes token = if token = sep then Infix.both 1 branch else Infix.unknown in
+    pratt_parser ~empty_prefix ~infixes () <* eat close
+
+  let tree_of p ~sep ~close =
     let prefixes token = if token = close then Prefix.return None else Prefix.unknown in
-    let empty_prefix = Prefix.custom ((fun tree _ -> Some tree) <$> non_empty <*> eat close) in
+    let empty_prefix = Prefix.custom ((fun x -> Some x) <$> non_empty_tree_of p ~sep ~close) in
     pratt_parser ~prefixes ~empty_prefix ()
 end
 
