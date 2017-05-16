@@ -16,7 +16,11 @@ let error ?token msg =
   | None -> Error_msg msg
   | Some token -> Error_with_token (token, msg)
 
-let make_at pos lex_at = {lex_at; pos; next = lazy (lex_at pos)}
+let verbose = ref false
+
+let make_at pos lex_at =
+  let next = lazy (if !verbose then Printf.printf "Lexing at position %i.\n" pos; lex_at pos) in
+  {lex_at; pos; next}
 
 let make lex_at = make_at 0 lex_at
 
@@ -62,11 +66,7 @@ let of_ocamllex_and_string lex s =
 
 let pos {pos; _} = pos
 
-let verbose = ref false
-
-let next {lex_at; pos; next = lazy (token, len)} =
-  if !verbose then Printf.printf "Lexing at position %i.\n" pos;
-  token, len, make_at (pos + len) lex_at
+let next {lex_at; pos; next = lazy (token, len)} = token, len, make_at (pos + len) lex_at
 
 let peek {next = lazy (token, _); _} = token
 

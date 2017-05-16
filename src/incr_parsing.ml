@@ -588,14 +588,14 @@ let rec update_parse : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'t
         Node.app left right, lexer, reuse
       else (* Update left. *)
         let left, lexer, reuse = left |> update_parse change ~lexer ~reuse ~left_pos in
-        let mid_pos = left_pos + Node.length left in
-        if mid_pos + added - removed = mid_pos && mid_pos > start_pos + added then
+        let mid_pos' = left_pos + Node.length left in
+        if mid_pos' = mid_pos + added - removed && mid_pos' > start_pos + added then
           (* The right node can be reused. It's position is the same once offset by
              added - removed and it is clear of all the new input (start_pos + added).
              This is a similar technique to the one used for reusing pratt nodes. *)
           Node.app left right, lexer, reuse
         else (* The right must be updated as well. *)
-          let right, lexer, reuse = right |> update_parse change ~lexer ~reuse ~left_pos:mid_pos in
+          let right, lexer, reuse = right |> update_parse change ~lexer ~reuse ~left_pos:mid_pos' in
           Node.app left right, lexer, reuse
 
 and update_pratt : type a. change_loc -> lexer:'tok Incr_lexer.t -> reuse:'tok Reuse.t ->
